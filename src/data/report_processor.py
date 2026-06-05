@@ -1,6 +1,6 @@
 import os
 import requests
-from PyPDF2 import PdfReader
+import fitz  # PyMuPDF
 from typing import List, Dict, Optional
 import re
 from edgar import Company, set_identity
@@ -66,12 +66,13 @@ class ReportProcessor:
             return ""
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extracts text from PDF (reads first 100 pages to find MD&A)."""
+        """Extracts text from PDF using PyMuPDF (reads first 100 pages)."""
         try:
-            reader = PdfReader(pdf_path)
+            doc = fitz.open(pdf_path)
             text = ""
-            for i in range(min(len(reader.pages), 100)): 
-                text += reader.pages[i].extract_text() + "\n"
+            for i in range(min(len(doc), 100)): 
+                text += doc[i].get_text() + "\n"
+            doc.close()
             return text
         except Exception as e:
             print(f"Error reading PDF {pdf_path}: {e}")
@@ -80,18 +81,30 @@ class ReportProcessor:
     def get_key_sections(self, full_text: str) -> Dict[str, str]:
         """Heuristic section extraction for Indian/Global reports."""
         sections = {"mda": ""}
+        
+        # Expanded list of patterns to handle ampersands and varied capitalization
         patterns = [
-            r"Management Discussion and Analysis",
-            r"Management's Discussion and Analysis",
-            r"Director's Report",
-            r"Board's Report"
+            r"Management\s+Discussion\s+(?:and|&)\s+Analysis",
+            r"Management's\s+Discussion\s+(?:and|&)\s+Analysis",
+            r"Director's\s+Report",
+            r"Board's\s+Report",
+            r"Statutory\s+Reports"
         ]
+        
         for pattern in patterns:
-            match = re.search(f"{pattern}", full_text, re.IGNORECASE)
+            # Use re.IGNORECASE and handle whitespace variations
+            match = re.search(pattern, full_text, re.IGNORECASE | re.MULTILINE)
             if match:
                 start = match.start()
-                sections["mda"] = full_text[start:start+30000] # Increased for Gemini
+                print(f"  🔍 Found section matching '{pattern}' at character {start}")
+                # Grab a larger chunk (40k chars) to ensure we get the full narrative
+                sections["mda"] = full_text[start:start+40000]
                 break
+        
+        if not sections["mda"]:
+            print(f"  ⚠️ Debug: MD&A extraction failed. Sample of extracted text (first 500 chars):")
+            print(f"  --- START SAMPLE ---\n{full_text[:500]}\n  --- END SAMPLE ---")
+                
         return sections
 
 class AIResearcher:

@@ -49,20 +49,28 @@ def main():
     print("\n[STEP 2] Running Expert AI Qualitative Analysis (Gemini 3.5 Flash)...")
     processor = ReportProcessor(ticker_symbol)
     ai = AIResearcher(api_key=api_key)
-    
+
     mda_text = ""
     is_us_stock = not ticker_symbol.endswith(".NS")
-    
-    if is_us_stock:
+
+    # --- FLEXIBLE LOCAL DETECTION ---
+    local_files = [f for f in os.listdir("reports") if f.upper().startswith(ticker_symbol.replace(".NS", "").upper())]
+    if local_files:
+        pdf_path = os.path.join("reports", local_files[0])
+        print(f"  ✅ Local report detected: {pdf_path}")
+        raw_text = processor.extract_text_from_pdf(pdf_path)
+        sections = processor.get_key_sections(raw_text)
+        mda_text = sections.get("mda", "")
+    elif is_us_stock:
         mda_text = processor.get_sec_mda()
     else:
-        # Try BSE first (more bot-friendly)
+        # Try BSE first (dynamic resolution)
         bse = BSEFetcher()
         report_url = bse.get_latest_annual_report_url(ticker_symbol)
-        
+
         # Fallback to NSE if BSE fails
         if not report_url:
-            print("  BSE failed or not mapped. Trying NSE...")
+            print("  BSE dynamic search failed. Trying NSE...")
             nse = NSEFetcher()
             report_url = nse.get_latest_annual_report_url(ticker_symbol)
 
@@ -73,7 +81,9 @@ def main():
                 sections = processor.get_key_sections(raw_text)
                 mda_text = sections.get("mda", "")
         else:
-            print(f"  Error: Could not find report URL for {ticker_symbol} on BSE or NSE.")
+            print(f"  ❌ Could not find report URL for {ticker_symbol} on BSE or NSE.")
+            print(f"  💡 Hint: Place the PDF in 'reports/' and name it '{ticker_symbol.replace('.NS','')}_annual_report.pdf'")
+
 
     adjustments = {"growth_rate_stage_1_offset": 0, "growth_rate_stage_2_offset": 0, "discount_rate_offset": 0}
     
