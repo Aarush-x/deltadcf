@@ -25,35 +25,33 @@ class ReportProcessor:
         }
 
     def get_sec_mda(self) -> Optional[str]:
-        """Fetches the real Item 7 (MD&A) from the latest 10-K for US stocks."""
+        """Fetches MD&A and Proxy Statement (for governance) from SEC."""
         try:
-            print(f"Fetching latest 10-K for {self.ticker} from SEC EDGAR...")
+            print(f"Fetching SEC filings for {self.ticker}...")
             company = Company(self.ticker)
-            filing = company.get_filings(form="10-K").latest()
-            if filing:
-                tenk = filing.obj()
-                mda_text = tenk['Item 7']
-                return str(mda_text)[:20000] # Increased limit for Gemini
-            return None
+            tenk = company.get_filings(form="10-K").latest().obj()
+            mda_text = tenk['Item 7']
+            
+            # Try to get Governance/Compensation (often in Item 11/13)
+            gov_text = ""
+            try:
+                gov_text = f"\n[GOVERNANCE DATA]\n{tenk['Item 11']}\n{tenk['Item 13']}"
+            except:
+                pass
+                
+            return (str(mda_text) + gov_text)[:30000]
         except Exception as e:
-            print(f"Error fetching SEC filing for {self.ticker}: {e}")
+            print(f"Error fetching SEC filings: {e}")
             return None
 
     def download_report(self, url: str) -> str:
         """Downloads a PDF report using robust session management."""
         file_path = os.path.join(self.reports_dir, f"{self.ticker.replace('.NS', '')}_annual_report.pdf")
-        
-        # Check if file already exists (Manual Fallback)
         if os.path.exists(file_path):
-            print(f"Found local report for {self.ticker} at {file_path}")
             return file_path
-            
-        print(f"Attempting to download report for {self.ticker}...")
         try:
-            # First, visit the homepage/parent to get cookies if it's a session-link
             parent_url = "/".join(url.split("/")[:-1])
             self.session.get(parent_url, headers=self.headers, timeout=10)
-            
             response = self.session.get(url, stream=True, timeout=30, headers=self.headers)
             response.raise_for_status()
             with open(file_path, 'wb') as f:
@@ -62,49 +60,38 @@ class ReportProcessor:
             return file_path
         except Exception as e:
             print(f"Error downloading report: {e}")
-            print(f"💡 Hint: Download the PDF manually, rename it to '{os.path.basename(file_path)}' and place it in the '{self.reports_dir}/' folder.")
             return ""
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extracts text from PDF using PyMuPDF (reads first 100 pages)."""
+        """Extracts text from PDF (reads first 150 pages to cover MD&A and Governance)."""
         try:
             doc = fitz.open(pdf_path)
             text = ""
-            for i in range(min(len(doc), 100)): 
+            for i in range(min(len(doc), 150)): 
                 text += doc[i].get_text() + "\n"
             doc.close()
             return text
         except Exception as e:
-            print(f"Error reading PDF {pdf_path}: {e}")
+            print(f"Error reading PDF: {e}")
             return ""
 
     def get_key_sections(self, full_text: str) -> Dict[str, str]:
         """Heuristic section extraction for Indian/Global reports."""
         sections = {"mda": ""}
-        
-        # Expanded list of patterns to handle ampersands and varied capitalization
         patterns = [
             r"Management\s+Discussion\s+(?:and|&)\s+Analysis",
-            r"Management's\s+Discussion\s+(?:and|&)\s+Analysis",
             r"Director's\s+Report",
-            r"Board's\s+Report",
-            r"Statutory\s+Reports"
+            r"Corporate\s+Governance\s+Report",
+            r"Board's\s+Report"
         ]
         
+        extracted_content = []
         for pattern in patterns:
-            # Use re.IGNORECASE and handle whitespace variations
-            match = re.search(pattern, full_text, re.IGNORECASE | re.MULTILINE)
-            if match:
+            for match in re.finditer(pattern, full_text, re.IGNORECASE | re.MULTILINE):
                 start = match.start()
-                print(f"  🔍 Found section matching '{pattern}' at character {start}")
-                # Grab a larger chunk (40k chars) to ensure we get the full narrative
-                sections["mda"] = full_text[start:start+40000]
-                break
+                extracted_content.append(full_text[start:start+15000])
         
-        if not sections["mda"]:
-            print(f"  ⚠️ Debug: MD&A extraction failed. Sample of extracted text (first 500 chars):")
-            print(f"  --- START SAMPLE ---\n{full_text[:500]}\n  --- END SAMPLE ---")
-                
+        sections["mda"] = "\n---\n".join(extracted_content)[:50000]
         return sections
 
 class AIResearcher:
@@ -119,36 +106,43 @@ class AIResearcher:
         else:
             self.model = None
 
-    def analyze_checklist(self, mda_text: str, checklist: str) -> str:
+    def analyze_checklist(self, context_text: str, checklist: str) -> str:
         """
-        Pass 2: Expert Analysis using Gemini.
+        Expert Analysis with 'Red Flag Filter' and Governance Audit.
         """
         if not self.model:
-            return "AI Error: GOOGLE_API_KEY not found. Please set the environment variable."
+            return "AI Error: GOOGLE_API_KEY not found."
 
         prompt = f"""
-        You are a Senior Equity Researcher. I will provide you with a section of an Annual Report (MD&A).
-        Your task is to audit this text against the following Fundamental Analysis Checklist:
+        You are a Senior Equity Researcher and Governance Expert. 
+        Audit the provided text from an Annual Report against this checklist:
         
         {checklist}
         
-        Analyze the text thoroughly. For each point, provide a summary of your findings.
-        Then, suggest specific adjustments to a 2-stage DCF valuation model:
-        1. Growth Rate Stage 1 (Years 1-5) offset (e.g., +2%, -3%)
-        2. Growth Rate Stage 2 (Years 6-10) offset
-        3. Discount Rate (Risk) offset
-        
-        ANNUAL REPORT TEXT:
-        {mda_text}
+        CRITICAL INSTRUCTIONS:
+        1. NOISE REDUCTION: Discard marketing fluff, award lists, and generic "vision" statements.
+        2. RED FLAG FILTER: Actively look for:
+           - Related-party transactions (siphoning risk).
+           - High CEO pay vs Profit growth.
+           - Frequent Auditor or Management changes.
+           - Promoter share pledging.
+           - Legal friction or regulatory investigations.
+        3. JUDGMENT: Be skeptical. If data is missing or opaque, note it as a risk.
+
+        TEXT FOR ANALYSIS:
+        {context_text}
         
         OUTPUT FORMAT:
-        [CHECKLIST AUDIT]
-        - Point 1: ...
-        ...
-        [DCF ADJUSTMENTS]
+        ### [CORE BUSINESS AUDIT]
+        - (Checklist results here)
+
+        ### [MANAGEMENT INTEGRITY REPORT]
+        - (Integrity findings here)
+
+        ### [VALUATION IMPACT]
         - Stage 1 Growth: +/- X%
         - Stage 2 Growth: +/- X%
-        - Discount Rate: +/- X%
+        - Discount Rate: +/- X% (Include a 'Governance Tax' if integrity is poor)
         """
         
         try:
@@ -158,22 +152,15 @@ class AIResearcher:
             return f"AI Generation Error: {e}"
 
     def parse_adjustments(self, ai_response: str) -> Dict[str, float]:
-        """
-        Pass 3: Extracts numeric offsets from Gemini's text response.
-        """
+        """Extracts numeric offsets from Gemini's response."""
         adjustments = {
             "growth_rate_stage_1_offset": 0.0,
             "growth_rate_stage_2_offset": 0.0,
             "discount_rate_offset": 0.0
         }
-        
-        # More robust regex: Look for 'Stage 1/2' and a percentage anywhere in the same line
         try:
-            # Stage 1
             s1_match = re.search(r"Stage 1.*?([\+\-][0-9.]+)%", ai_response, re.IGNORECASE)
-            # Stage 2
             s2_match = re.search(r"Stage 2.*?([\+\-][0-9.]+)%", ai_response, re.IGNORECASE)
-            # Discount Rate / WACC
             dr_match = re.search(r"(?:Discount Rate|WACC).*?([\+\-][0-9.]+)%", ai_response, re.IGNORECASE)
             
             if s1_match: adjustments["growth_rate_stage_1_offset"] = float(s1_match.group(1)) / 100
@@ -181,9 +168,7 @@ class AIResearcher:
             if dr_match: adjustments["discount_rate_offset"] = float(dr_match.group(1)) / 100
         except Exception:
             pass
-            
         return adjustments
 
 if __name__ == "__main__":
-    # Example flow
     processor = ReportProcessor("AAPL")

@@ -1,0 +1,46 @@
+/Users/aarushmuralinathan/Documents/Fundamental Anlaysis/src/data/report_processor.py:7: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+--- ANALYZING ETERNAL.NS ---
+
+[STEP 1] Running Quantitative Checklist...
+  ✅ PASS | GPM > 20%: 44.5%
+  ✅ PASS | Debt Level: D/A: 0.11
+  ✅ PASS | Positive CFO: 6,320,000,000
+  ❌ FAIL | ROE > 25%: 1.2%
+
+[STEP 2] Running Expert AI Qualitative Analysis (Gemini 3.5 Flash)...
+  ✅ Local report detected: reports/Eternal_Annual_Report_2024-25.pdf
+  🔍 Found section matching 'Management\s+Discussion\s+(?:and|&)\s+Analysis' at character 532
+
+[AI RESEARCHER REPORT]
+[CHECKLIST AUDIT]
+- **Point 1: Gross Profit Margin > 20% (Partial Pass / Segment Dependent)**: Standard Gross Profit is not explicitly defined in the platform-style reporting. However, using "Contribution Margin" as a proxy for platform Gross Profit: Food Delivery contribution is 32.8% of Adjusted Revenue (INR 3,092 Cr / INR 9,418 Cr), and Quick Commerce is 18.3% (INR 953 Cr / INR 5,206 Cr). While the core B2C tech segments structurally operate with margins above 20%, the overall consolidated margin is dragged down by the rapid scale-up of the B2B Hyperpure (1P) business (operating on a razor-thin -1% Adjusted EBITDA margin).
+- **Point 2: Revenue Growth (In line with GP growth) (Pass)**: Revenue growth is robust and backed by expanding gross profitability (operating leverage). Consolidated GAAP revenue grew by 67% YoY (INR 20,243 Cr) and Adjusted Revenue grew by 59% YoY. Crucially, Contribution (GP proxy) grew faster than revenue: Quick Commerce contribution grew 258% YoY (vs. 126% revenue growth), and Food Delivery contribution grew 39% YoY (vs. 21% Adjusted Revenue growth). 
+- **Point 3: EPS (Consistent with Net Profits / Dilution Check) (Fail)**: While GAAP PAT grew 50% YoY (from INR 351 crore in FY24 to INR 527 crore in FY25), significant equity dilution occurred during the year. The company raised INR 8,446 crore through a massive QIP in November 2024. This substantial increase in the outstanding share count will dilute EPS growth relative to absolute net profit growth.
+- **Point 4: Debt Level (Pass)**: The company has excellent solvency. It operates with virtually zero long-term debt and maintains an enormous consolidated cash and treasury balance of INR 18,824 crore as of March 2025 (up from INR 12,241 crore in March 2024).
+- **Point 5: Inventory (Monitor / B2B Risk)**: The core B2C platforms do not carry inventory risk. However, Hyperpure operates on a 1P inventory-led model and grew 95% YoY. The report highlights that "working capital investments in our Hyperpure" partially offset cash balance growth, indicating cash is being tied up in inventory and logistics to support B2B scale.
+- **Point 6: Sales vs Receivables (Pass)**: B2C operations (Food Delivery, Quick Commerce, Going-out) collect payments immediately via digital gateways, resulting in zero receivables risk. Only the B2B Hyperpure segment carries credit terms, but the overall business is overwhelmingly cash-generative on a transactional level.
+- **Point 7: Cash Flow from Operations (Pass)**: Operational cash flows are positive and growing, supported by a 3x YoY expansion in Consolidated Adjusted EBITDA to INR 1,079 crore (GAAP EBITDA of INR 637 crore).
+- **Point 8: Return on Equity > 25% (Fail)**: ROE is extremely poor (estimated at ~2.5% to 3%). With a PAT of INR 527 crore against an equity base heavily inflated by the INR 8,446 crore QIP and a total cash pile of INR 18,824 crore, the company's capital efficiency is severely compromised by hoarding unproductive low-yield cash.
+- **Point 9: Business Diversity (Fail)**: The company has drifted far from a simple business structure. It now operates four distinct, complex business lines: Food Delivery, Quick Commerce (Blinkit), Going-out/Ticketing (District app), and B2B Supplies (Hyperpure). This multi-conglomerate model increases operational complexity.
+- **Point 10: Subsidiaries (Moderate Risk)**: The web of subsidiaries is growing due to M&A. This year, the company acquired Paytm’s entertainment ticketing business, creating two new wholly owned subsidiaries (Orbgen Technologies and Wasteland Entertainment), in addition to the Blinkit integration. Siphoning risk is low due to strong institutional oversight and AA ESG ratings, but integration and corporate structure complexity are high.
+
+[DCF ADJUSTMENTS]
+- **Stage 1 Growth (Years 1-5) offset**: **+3.00%** (Upward adjustment justified by the hyper-growth of Blinkit [+126% YoY], the scaling of the District app via Paytm's ticketing acquisition, and a strong 20% baseline growth in the mature Food Delivery segment).
+- **Stage 2 Growth (Years 6-10) offset**: **+1.00%** (Slight positive offset due to the massive digital and consumption runway in India, alongside ecosystem lock-in via the unified "Eternal" brands).
+- **Discount Rate (Risk) offset**: **-0.50%** (A reduction in the discount rate is warranted due to the complete elimination of solvency/default risk, backed by a fortress balance sheet holding INR 18,824 crore in cash, offsetting integration and execution risks).
+
+[STEP 3] Final DCF Parameters (after AI Audit):
+  Stage 1 Growth: 21.0% (Base: 18.0%)
+  Stage 2 Growth: 11.0% (Base: 10.0%)
+  Discount Rate:  8.5% (Base: 9.0%)
+
+--- VALUATION RESULTS ---
+Intrinsic Price per Share: -61.65

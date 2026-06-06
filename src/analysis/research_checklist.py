@@ -2,8 +2,8 @@ from typing import Dict, Any, List
 
 class ResearchChecklist:
     """
-    Implements the 10-point Fundamental Analysis checklist.
-    Categorizes checks into 'Quantitative' (Data-driven) and 'Qualitative' (AI-driven).
+    Implements the Fundamental Analysis checklist.
+    Categorizes checks into 'Quantitative', 'Qualitative', and 'Management Character'.
     """
     
     def __init__(self, ticker_data: Dict[str, Any]):
@@ -51,14 +51,27 @@ class ResearchChecklist:
                 'insight': "High ROE is great for investors." if roe > 0.25 else "ROE is below target threshold."
             }
 
-    def get_ai_research_prompts(self) -> List[str]:
-        """Generates prompts for the AI to extract qualitative data from MD&A."""
-        return [
-            "Analyze the business segments: Does the company operate in 1 or 2 simple business lines, or are they overly diversified?",
-            "Count the subsidiaries mentioned: Are there an excessive number of subsidiaries that might suggest siphoning of money?",
-            "Look for 'Sales vs Receivables' commentary: Is revenue growth backed by actual cash collections or just increasing receivables?",
-            "Check inventory trends: Is inventory growing alongside PAT margins? Note the inventory days if mentioned."
-        ]
+    def get_ai_research_prompts(self) -> str:
+        """Generates the full checklist instructions for Gemini."""
+        return """
+        --- CORE BUSINESS CHECKLIST ---
+        1. Gross Profit Margin > 20%: Sustainable moat evidence?
+        2. Revenue Growth: Is it backed by GP growth?
+        3. EPS: Consistent with Net Profits? (Check for share dilution)
+        4. Debt Level: Is the company over-leveraged?
+        5. Inventory: Growing alongside PAT margin? (Manufacturing)
+        6. Sales vs Receivables: Revenue backed by cash collections?
+        7. Cash flow from operations: Is it positive and healthy?
+        8. Return on Equity > 25%: Efficient capital usage?
+        9. Business Diversity: 1-2 simple business lines preferred.
+        10. Subsidiaries: Are there too many? (Siphoning risk)
+
+        --- MANAGEMENT INTEGRITY AUDIT ---
+        - Executive Compensation: Is CEO pay excessive relative to profits or peers?
+        - Management Stability: Have there been frequent changes in CEO, CFO, or Auditors?
+        - Promoter/Owner Alignment: Are shares being pledged? (India specific) Are owners distracted by other ventures?
+        - Controversies: Any history of legal friction, related-party transactions, or ethical "Red Flags"?
+        """
 
 if __name__ == "__main__":
     # Mock data check

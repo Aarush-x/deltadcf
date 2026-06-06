@@ -1,0 +1,34 @@
+/Users/aarushmuralinathan/Documents/Fundamental Anlaysis/src/data/report_processor.py:7: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+--- ANALYZING INFY.NS ---
+
+[STEP 1] Running Quantitative Checklist...
+  ✅ PASS | GPM > 20%: 30.2%
+  ✅ PASS | Debt Level: D/A: 0.06
+  ✅ PASS | Positive CFO: 4,039,000,000
+  ✅ PASS | ROE > 25%: 31.4%
+
+[STEP 2] Running Expert AI Qualitative Analysis (Gemini 3.5 Flash)...
+Error resolving scrip code for INFY: Expecting value: line 3 column 1 (char 4)
+Could not resolve BSE Scrip Code for INFY
+  BSE dynamic search failed. Trying NSE...
+Initializing NSE session...
+Error fetching report URL from NSE: Expecting value: line 1 column 1 (char 0)
+  ❌ Could not find report URL for INFY.NS on BSE or NSE.
+  💡 Hint: Place the PDF in 'reports/' and name it 'INFY_annual_report.pdf'
+  Warning: No MD&A text found for qualitative analysis. Using base assumptions.
+
+[STEP 3] Final DCF Parameters (after AI Audit):
+  Stage 1 Growth: 18.0% (Base: 18.0%)
+  Stage 2 Growth: 10.0% (Base: 10.0%)
+  Discount Rate:  9.0% (Base: 9.0%)
+
+--- VALUATION RESULTS ---
+Intrinsic Price per Share: 38.24
