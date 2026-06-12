@@ -33,7 +33,7 @@ export default function Navbar({
       </div>
 
       <div className="flex flex-1 max-w-2xl mx-10">
-        <div className="relative w-full flex items-center bg-[#111111] border border-border-terminal">
+        <div className="relative w-full flex items-center bg-background border border-border-terminal">
           <input
             className="ticker-input w-full bg-transparent border-none text-on-surface font-data-md text-data-md h-9 px-3 placeholder:text-text-dim"
             placeholder="Enter ticker... e.g. AAPL, ETERNAL.NS"

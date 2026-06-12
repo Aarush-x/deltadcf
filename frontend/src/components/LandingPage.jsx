@@ -48,6 +48,9 @@ export default function LandingPage({ onAnalyze, isDark, onToggleTheme }) {
             ANALYZE →
           </button>
         </div>
+        <p className="mt-4 font-data-sm text-data-sm text-text-dim opacity-70">
+          Tip: Append <span className="text-on-surface">.NS</span> for NSE or <span className="text-on-surface">.BO</span> for BSE to target specific Indian exchanges.
+        </p>
       </div>
     </div>
   );

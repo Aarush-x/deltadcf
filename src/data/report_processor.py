@@ -190,11 +190,12 @@ class AIResearcher:
         
         try:
             response = self.client.models.generate_content(
-                model="gemini-3.5-flash",
+                model="gemini-flash-latest",
                 contents=prompt,
             )
             return self.parse_structured_response(response.text)
-        except Exception:
+        except Exception as e:
+            print(f"AI Analysis Error: {e}")
             return self.empty_response()
 
 if __name__ == "__main__":

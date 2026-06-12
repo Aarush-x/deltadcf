@@ -2,12 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --background: #f9fafb;
+    --on-surface: #111827;
+    --on-surface-variant: #4b5563;
+    --border-terminal: #e5e7eb;
+    --nested-bg: #f3f4f6;
+    --text-dim: #6b7280;
+    --surface: #ffffff;
+    --surface-container: #f9fafb;
+    --outline: #9ca3af;
+  }
+
+  .dark {
+    --background: #0b0b0b;
+    --on-surface: #e2e2e2;
+    --on-surface-variant: #c2c6d6;
+    --border-terminal: #1F1F1F;
+    --nested-bg: #0A0A0A;
+    --text-dim: #8c909f;
+    --surface: #121414;
+    --surface-container: #1e2020;
+    --outline: #8c909f;
+  }
+}
+
 body {
-  background-color: #0b0b0b;
-  color: #e2e2e2;
+  background-color: var(--background);
+  color: var(--on-surface);
   margin: 0;
   overflow-x: hidden;
   font-family: "Hanken Grotesk", sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 ::-webkit-scrollbar {
@@ -15,10 +42,10 @@ body {
   height: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b0b0b;
+  background: var(--background);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1f1f1f;
+  background: var(--border-terminal);
 }
 
 .ticker-input:focus {
@@ -28,18 +55,27 @@ body {
 .shimmer-row {
   background: linear-gradient(
     90deg,
+    rgba(31, 31, 31, 0.1) 0%,
+    rgba(31, 31, 31, 0.2) 50%,
+    rgba(31, 31, 31, 0.1) 100%
+  );
+  background-size: 200% 100%;
+}
+
+.dark .shimmer-row {
+  background: linear-gradient(
+    90deg,
     #1a1a1a 0%,
     #2a2a2a 50%,
     #1a1a1a 100%
   );
-  background-size: 200% 100%;
 }
 
 .collapsible-content {
   max-height: 0;
   overflow: hidden;
-  transition: max-height 0.15s ease-out;
+  transition: max-height 0.2s ease-out;
 }
 .collapsible-trigger[aria-expanded="true"] + .collapsible-content {
-  max-height: 300px;
+  max-height: 500px;
 }

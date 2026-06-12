@@ -1,4 +1,5 @@
 import os
+import yfinance as yf
 
 from dotenv import load_dotenv
 
@@ -64,6 +65,53 @@ def transform_checklist_results(results: dict) -> list:
     ]
 
 
+def resolve_ticker(query: str) -> str:
+    """
+    Tries to resolve a query (ticker or company name) to a valid ticker symbol.
+    Prefers NSE (.NS) for Indian stocks and major US exchanges for others.
+    """
+    query = query.strip().upper()
+    
+    # If it already looks like a ticker, return it
+    if "." in query or (len(query) <= 5 and query.isalpha()):
+        # Quick check if it exists
+        try:
+            t = yf.Ticker(query)
+            if t.info.get('symbol'):
+                return query
+        except:
+            pass
+
+    try:
+        search = yf.Search(query, max_results=8)
+        quotes = search.quotes
+        if not quotes:
+            return query
+
+        # 1. Prefer NSE (.NS)
+        for q in quotes:
+            symbol = q.get('symbol', '')
+            if symbol.endswith('.NS'):
+                return symbol
+        
+        # 2. Prefer BSE (.BO)
+        for q in quotes:
+            symbol = q.get('symbol', '')
+            if symbol.endswith('.BO'):
+                return symbol
+                
+        # 3. Prefer US Major Exchanges
+        for q in quotes:
+            exch = q.get('exchange', '')
+            if exch in ['NMS', 'NYQ', 'ASE']:
+                return q.get('symbol', '')
+        
+        # 4. Return first result if nothing specific matched
+        return quotes[0].get('symbol', query)
+    except:
+        return query
+
+
 def get_mda_text(ticker_symbol: str, processor: ReportProcessor) -> str:
     is_us_stock = not ticker_symbol.endswith(".NS")
 
@@ -101,7 +149,8 @@ def get_mda_text(ticker_symbol: str, processor: ReportProcessor) -> str:
 
 @app.get("/api/analyze/{ticker}")
 async def analyze(ticker: str):
-    ticker_symbol = ticker.upper()
+    # Resolve company name to ticker
+    ticker_symbol = resolve_ticker(ticker)
 
     try:
         api_key = os.getenv("GOOGLE_API_KEY")

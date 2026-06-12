@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { auditStatusColor, auditStatusLabel } from "../utils/format";
 
 function AuditRow({ item }) {
@@ -6,13 +7,19 @@ function AuditRow({ item }) {
   const id = String(item.id).padStart(2, "0");
 
   return (
-    <div className="border border-border-terminal bg-background">
+    <div className="border border-border-terminal bg-background transition-colors duration-200">
       <button
         aria-expanded={expanded}
-        className="collapsible-trigger w-full flex items-center justify-between p-3 hover:bg-[#111111] transition-colors focus:outline-none text-left"
+        className="collapsible-trigger w-full flex items-center justify-between p-3 hover:bg-on-surface/[0.03] transition-colors focus:outline-none text-left"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3">
+          <ChevronRight
+            size={16}
+            className={`text-text-dim transition-transform duration-200 ${
+              expanded ? "rotate-90" : ""
+            }`}
+          />
           <span className="font-data-sm text-on-surface-variant w-6">{id}</span>
           <span className="font-data-md text-on-surface font-medium">{item.title}</span>
         </div>
@@ -25,7 +32,7 @@ function AuditRow({ item }) {
         </div>
       </button>
       <div className="collapsible-content border-t border-border-terminal bg-nested-bg">
-        <div className="p-3 text-on-surface-variant font-body-md text-sm">
+        <div className="p-3 text-on-surface-variant font-body-md text-sm leading-relaxed">
           {item.description}
         </div>
       </div>
