@@ -43,13 +43,16 @@ class NSEFetcher:
             response = self.session.get(api_url, headers=self.headers, timeout=10)
             
             if response.status_code == 200:
-                data = response.json().get('data', [])
-                if data:
-                    # Reports are usually sorted by year; get the first one
-                    latest_report = data[0]
-                    url = latest_report.get('url')
-                    print(f"Found latest NSE report for {clean_symbol}: {latest_report.get('financialYear')}")
-                    return url
+                try:
+                    data = response.json().get('data', [])
+                    if data:
+                        # Reports are usually sorted by year; get the first one
+                        latest_report = data[0]
+                        url = latest_report.get('url')
+                        print(f"Found latest NSE report for {clean_symbol}: {latest_report.get('financialYear')}")
+                        return url
+                except ValueError:
+                    print(f"NSE API returned non-JSON response for {clean_symbol} (Bot protection likely)")
             else:
                 print(f"NSE API error ({response.status_code}) for {clean_symbol}")
                 

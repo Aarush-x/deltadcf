@@ -68,6 +68,7 @@ export default function AnalysisPage({
               <IntrinsicValue
                 valuation={data.valuation}
                 dcfParameters={data.dcf_parameters}
+                currency={data.currency}
               />
               <ManagementIntegrity
                 items={data.ai_researcher_report?.management_integrity}

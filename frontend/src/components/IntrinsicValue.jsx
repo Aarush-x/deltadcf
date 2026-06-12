@@ -6,7 +6,7 @@ const DCF_ROWS = [
   { key: "discount_rate", label: "Discount Rate" },
 ];
 
-export default function IntrinsicValue({ valuation, dcfParameters }) {
+export default function IntrinsicValue({ valuation, dcfParameters, currency }) {
   const price = valuation?.intrinsic_price_per_share ?? 0;
   const isNegative = price < 0;
 
@@ -19,13 +19,20 @@ export default function IntrinsicValue({ valuation, dcfParameters }) {
       </header>
 
       <div className="flex flex-col items-center justify-center py-8 border border-border-terminal bg-background mb-6">
-        <span
-          className={`font-data-lg text-5xl mb-2 ${
-            isNegative ? "text-critical" : "text-success"
-          }`}
-        >
-          {formatPrice(price)}
-        </span>
+        <div className="flex items-baseline gap-2 mb-2">
+          <span
+            className={`font-data-lg text-5xl ${
+              isNegative ? "text-critical" : "text-success"
+            }`}
+          >
+            {formatPrice(price)}
+          </span>
+          {currency && (
+            <span className="font-data-md text-xl text-text-dim uppercase">
+              {currency}
+            </span>
+          )}
+        </div>
         <span className="font-data-sm text-data-sm text-text-dim uppercase tracking-widest">
           {isNegative ? "NEGATIVE EQUITY VALUE" : "INTRINSIC VALUE"}
         </span>

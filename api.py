@@ -36,7 +36,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:3001"],
     allow_methods=["GET"],
     allow_headers=["*"],
 )
@@ -156,8 +156,11 @@ async def analyze(ticker: str):
         intrinsic_value = engine.calculate_intrinsic_value()
         price_per_share = engine.calculate_price_per_share(intrinsic_value, net_debt, shares)
 
+        currency = "INR" if ticker_symbol.endswith(".NS") or ticker_symbol.endswith(".BO") else "USD"
+
         return {
             "ticker": ticker_symbol,
+            "currency": currency,
             "quantitative_checklist": quantitative_checklist,
             "ai_researcher_report": {
                 "core_business_audit": ai_report["core_business_audit"],

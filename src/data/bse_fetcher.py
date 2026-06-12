@@ -33,14 +33,17 @@ class BSEFetcher:
             search_api = f"https://api.bseindia.com/BseIndiaAPI/api/getScCode/w?text={clean_symbol}"
             response = self.session.get(search_api, headers=self.headers, timeout=10)
             if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list) and len(data) > 0:
-                    # Look for exact match or first result
-                    for item in data:
-                        # item['value'] is typically the scrip code
-                        if clean_symbol in str(item.get('label', '')).upper():
-                            return str(item.get('value'))
-                    return str(data[0].get('value'))
+                try:
+                    data = response.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        # Look for exact match or first result
+                        for item in data:
+                            # item['value'] is typically the scrip code
+                            if clean_symbol in str(item.get('label', '')).upper():
+                                return str(item.get('value'))
+                        return str(data[0].get('value'))
+                except ValueError:
+                    print(f"BSE Scrip Code API returned non-JSON response for {clean_symbol}")
         except Exception as e:
             print(f"Error resolving scrip code for {clean_symbol}: {e}")
             
@@ -66,13 +69,16 @@ class BSEFetcher:
             try:
                 response = self.session.get(api_url, params=params, headers=self.headers, timeout=10)
                 if response.status_code == 200:
-                    data = response.json()
-                    if isinstance(data, list) and len(data) > 0:
-                        for item in data:
-                            filename = item.get('FileName') or item.get('ATTACHMENTNAME')
-                            if filename:
-                                url = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{filename}"
-                                return url
+                    try:
+                        data = response.json()
+                        if isinstance(data, list) and len(data) > 0:
+                            for item in data:
+                                filename = item.get('FileName') or item.get('ATTACHMENTNAME')
+                                if filename:
+                                    url = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{filename}"
+                                    return url
+                    except ValueError:
+                        print(f"BSE Annual Report API returned non-JSON response for {clean_symbol}")
             except Exception:
                 pass
                 

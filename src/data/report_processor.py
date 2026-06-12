@@ -190,7 +190,7 @@ class AIResearcher:
         
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.5-flash",
                 contents=prompt,
             )
             return self.parse_structured_response(response.text)
