@@ -14,7 +14,7 @@ export default function QuantitativeChecklist({ items = [] }) {
           >
             <span className="font-data-md text-on-surface-variant">{item.metric}</span>
             <div className="flex items-center gap-4">
-              <span className="font-data-md text-on-surface">{item.value}</span>
+              <span className="font-data-md text-on-surface tabular-nums">{item.value}</span>
               <div
                 className={`flex items-center gap-1.5 ${
                   item.status === "PASS" ? "text-success" : "text-critical"
