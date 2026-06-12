@@ -1,10 +1,11 @@
+import json
 import os
+import re
 import requests
 import fitz  # PyMuPDF
 from typing import List, Dict, Optional
-import re
 from edgar import Company, set_identity
-import google.generativeai as genai
+from google import genai
 
 class ReportProcessor:
     """
@@ -96,29 +97,64 @@ class ReportProcessor:
 
 class AIResearcher:
     """
-    Pass 2 & 3: The Researcher and The Adjuster using Gemini 3.5 Flash.
+    Pass 2 & 3: The Researcher and The Adjuster using Gemini 2.0 Flash.
     """
     
     def __init__(self, api_key: Optional[str] = None):
         if api_key:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-3.5-flash')
+            self.client = genai.Client(api_key=api_key)
         else:
-            self.model = None
+            self.client = None
 
-    def analyze_checklist(self, context_text: str, checklist: str) -> str:
+    @staticmethod
+    def empty_response() -> Dict:
+        return {
+            "core_business_audit": [],
+            "management_integrity": [],
+            "valuation_impact": {
+                "stage_1_growth_offset": 0.0,
+                "stage_2_growth_offset": 0.0,
+                "discount_rate_offset": 0.0,
+            },
+        }
+
+    def parse_structured_response(self, raw: str) -> Dict:
+        """Parse JSON from Gemini response, stripping markdown fences if present."""
+        text = raw.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        parsed = json.loads(text)
+        return {
+            "core_business_audit": parsed.get("core_business_audit", []),
+            "management_integrity": parsed.get("management_integrity", []),
+            "valuation_impact": {
+                "stage_1_growth_offset": float(
+                    parsed.get("valuation_impact", {}).get("stage_1_growth_offset", 0.0)
+                ),
+                "stage_2_growth_offset": float(
+                    parsed.get("valuation_impact", {}).get("stage_2_growth_offset", 0.0)
+                ),
+                "discount_rate_offset": float(
+                    parsed.get("valuation_impact", {}).get("discount_rate_offset", 0.0)
+                ),
+            },
+        }
+
+    def analyze_checklist(self, context_text: str, checklist: str) -> Dict:
         """
         Expert Analysis with 'Red Flag Filter' and Governance Audit.
+        Returns structured JSON matching the valuation schema.
         """
-        if not self.model:
-            return "AI Error: GOOGLE_API_KEY not found."
+        if not self.client:
+            return self.empty_response()
 
         prompt = f"""
-        You are a Senior Equity Researcher and Governance Expert. 
+        You are a Senior Equity Researcher and Governance Expert.
         Audit the provided text from an Annual Report against this checklist:
-        
+
         {checklist}
-        
+
         CRITICAL INSTRUCTIONS:
         1. NOISE REDUCTION: Discard marketing fluff, award lists, and generic "vision" statements.
         2. RED FLAG FILTER: Actively look for:
@@ -131,44 +167,35 @@ class AIResearcher:
 
         TEXT FOR ANALYSIS:
         {context_text}
-        
-        OUTPUT FORMAT:
-        ### [CORE BUSINESS AUDIT]
-        - (Checklist results here)
 
-        ### [MANAGEMENT INTEGRITY REPORT]
-        - (Integrity findings here)
+        Respond ONLY with a valid JSON object. No Markdown fences, no preamble, no explanation.
+        Use this exact schema:
+        {{
+          "core_business_audit": [
+            {{ "id": 1, "title": "string", "status": "PASS" | "FAIL" | "MONITOR", "description": "string" }}
+          ],
+          "management_integrity": [
+            {{ "title": "string", "severity": "Red Flag" | "Caution" | "Pass", "description": "string" }}
+          ],
+          "valuation_impact": {{
+            "stage_1_growth_offset": 0.03,
+            "stage_2_growth_offset": 0.01,
+            "discount_rate_offset": -0.005
+          }}
+        }}
 
-        ### [VALUATION IMPACT]
-        - Stage 1 Growth: +/- X%
-        - Stage 2 Growth: +/- X%
-        - Discount Rate: +/- X% (Include a 'Governance Tax' if integrity is poor)
+        Offset values are decimal fractions (e.g. 0.03 means +3%, -0.005 means -0.5%).
+        Include all 10 checklist items in core_business_audit with ids 1 through 10.
         """
         
         try:
-            response = self.model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            return f"AI Generation Error: {e}"
-
-    def parse_adjustments(self, ai_response: str) -> Dict[str, float]:
-        """Extracts numeric offsets from Gemini's response."""
-        adjustments = {
-            "growth_rate_stage_1_offset": 0.0,
-            "growth_rate_stage_2_offset": 0.0,
-            "discount_rate_offset": 0.0
-        }
-        try:
-            s1_match = re.search(r"Stage 1.*?([\+\-][0-9.]+)%", ai_response, re.IGNORECASE)
-            s2_match = re.search(r"Stage 2.*?([\+\-][0-9.]+)%", ai_response, re.IGNORECASE)
-            dr_match = re.search(r"(?:Discount Rate|WACC).*?([\+\-][0-9.]+)%", ai_response, re.IGNORECASE)
-            
-            if s1_match: adjustments["growth_rate_stage_1_offset"] = float(s1_match.group(1)) / 100
-            if s2_match: adjustments["growth_rate_stage_2_offset"] = float(s2_match.group(1)) / 100
-            if dr_match: adjustments["discount_rate_offset"] = float(dr_match.group(1)) / 100
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
+            return self.parse_structured_response(response.text)
         except Exception:
-            pass
-        return adjustments
+            return self.empty_response()
 
 if __name__ == "__main__":
     processor = ReportProcessor("AAPL")

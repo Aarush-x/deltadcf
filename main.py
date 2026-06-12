@@ -102,11 +102,16 @@ def main():
         10. Subsidiaries: Not too many (check for siphoning risk)
         """
         
-        ai_response = ai.analyze_checklist(mda_text, full_checklist_text)
+        ai_report = ai.analyze_checklist(mda_text, full_checklist_text)
         print("\n[AI RESEARCHER REPORT]")
-        print(ai_response)
-        
-        adjustments = ai.parse_adjustments(ai_response)
+        print(json.dumps(ai_report, indent=2))
+
+        valuation_impact = ai_report["valuation_impact"]
+        adjustments = {
+            "growth_rate_stage_1_offset": valuation_impact["stage_1_growth_offset"],
+            "growth_rate_stage_2_offset": valuation_impact["stage_2_growth_offset"],
+            "discount_rate_offset": valuation_impact["discount_rate_offset"],
+        }
     else:
         print("  Warning: No MD&A text found for qualitative analysis. Using base assumptions.")
 

@@ -1,34 +1,53 @@
+import json
+
 from src.data.report_processor import AIResearcher
 
-def test_parse_adjustments_robustness():
+
+def test_parse_structured_response_valid_json():
     ai = AIResearcher()
-    
-    # Test case 1: Gemini's preferred phrasing "Growth Rate Stage 1"
-    response1 = """
-    [DCF ADJUSTMENTS]
-    - Growth Rate Stage 1: +2.0%
-    - Growth Rate Stage 2: +1.0%
-    - Discount Rate: -0.5%
-    """
-    adj1 = ai.parse_adjustments(response1)
-    assert adj1['growth_rate_stage_1_offset'] == 0.02
-    assert adj1['growth_rate_stage_2_offset'] == 0.01
-    assert adj1['discount_rate_offset'] == -0.005
+    raw = json.dumps({
+        "core_business_audit": [
+            {"id": 1, "title": "GPM", "status": "PASS", "description": "Strong margin"}
+        ],
+        "management_integrity": [
+            {"title": "CEO Pay", "severity": "Pass", "description": "Reasonable compensation"}
+        ],
+        "valuation_impact": {
+            "stage_1_growth_offset": 0.02,
+            "stage_2_growth_offset": 0.01,
+            "discount_rate_offset": -0.005,
+        },
+    })
+    result = ai.parse_structured_response(raw)
+    assert result["core_business_audit"][0]["status"] == "PASS"
+    assert result["valuation_impact"]["stage_1_growth_offset"] == 0.02
+    assert result["valuation_impact"]["stage_2_growth_offset"] == 0.01
+    assert result["valuation_impact"]["discount_rate_offset"] == -0.005
 
-    # Test case 2: Bolded and bulleted
-    response2 = """
-    * **Stage 1 Growth**: **+3.00%**
-    * **Stage 2 Growth**: **+0.5%**
-    * **WACC**: **-0.25%**
-    """
-    adj2 = ai.parse_adjustments(response2)
-    assert adj2['growth_rate_stage_1_offset'] == 0.03
-    assert adj2['growth_rate_stage_2_offset'] == 0.005
-    assert adj2['discount_rate_offset'] == -0.0025
 
-    # Test case 3: Minimal labels
-    response3 = "Stage 1: +1.5%, Stage 2: -1.0%, Discount Rate: +0.1%"
-    adj3 = ai.parse_adjustments(response3)
-    assert adj3['growth_rate_stage_1_offset'] == 0.015
-    assert adj3['growth_rate_stage_2_offset'] == -0.01
-    assert adj3['discount_rate_offset'] == 0.001
+def test_parse_structured_response_strips_markdown_fences():
+    ai = AIResearcher()
+    raw = """```json
+    {
+        "core_business_audit": [],
+        "management_integrity": [],
+        "valuation_impact": {
+            "stage_1_growth_offset": 0.03,
+            "stage_2_growth_offset": 0.005,
+            "discount_rate_offset": -0.0025
+        }
+    }
+    ```"""
+    result = ai.parse_structured_response(raw)
+    assert result["valuation_impact"]["stage_1_growth_offset"] == 0.03
+    assert result["valuation_impact"]["stage_2_growth_offset"] == 0.005
+    assert result["valuation_impact"]["discount_rate_offset"] == -0.0025
+
+
+def test_empty_response_defaults():
+    result = AIResearcher.empty_response()
+    assert result["core_business_audit"] == []
+    assert result["management_integrity"] == []
+    assert result["valuation_impact"]["stage_1_growth_offset"] == 0.0
+    assert result["valuation_impact"]["stage_2_growth_offset"] == 0.0
+    assert result["valuation_impact"]["discount_rate_offset"] == 0.0
