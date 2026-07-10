@@ -42,7 +42,7 @@ def main():
     checklist_obj.run_quantitative_checks()
     
     for check, res in checklist_obj.results.items():
-        status = "✅ PASS" if res['passed'] else "❌ FAIL"
+        status = "PASS" if res['passed'] else "FAIL"
         print(f"  {status} | {check}: {res['value']}")
 
     # 3. AI Layer (Qualitative Analysis)
@@ -57,7 +57,7 @@ def main():
     local_files = [f for f in os.listdir("reports") if f.upper().startswith(ticker_symbol.replace(".NS", "").upper())]
     if local_files:
         pdf_path = os.path.join("reports", local_files[0])
-        print(f"  ✅ Local report detected: {pdf_path}")
+        print(f"  Local report detected: {pdf_path}")
         raw_text = processor.extract_text_from_pdf(pdf_path)
         sections = processor.get_key_sections(raw_text)
         mda_text = sections.get("mda", "")
@@ -81,8 +81,8 @@ def main():
                 sections = processor.get_key_sections(raw_text)
                 mda_text = sections.get("mda", "")
         else:
-            print(f"  ❌ Could not find report URL for {ticker_symbol} on BSE or NSE.")
-            print(f"  💡 Hint: Place the PDF in 'reports/' and name it '{ticker_symbol.replace('.NS','')}_annual_report.pdf'")
+            print(f"   Could not find report URL for {ticker_symbol} on BSE or NSE.")
+            print(f"   Hint: Place the PDF in 'reports/' and name it '{ticker_symbol.replace('.NS','')}_annual_report.pdf'")
 
 
     adjustments = {"growth_rate_stage_1_offset": 0, "growth_rate_stage_2_offset": 0, "discount_rate_offset": 0}
