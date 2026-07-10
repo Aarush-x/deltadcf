@@ -71,13 +71,19 @@ class FinancialDataFetcher:
         return self.ticker.info.get('sharesOutstanding')
 
     def get_net_debt(self) -> Optional[float]:
-        info = self.ticker.info
-        total_debt = info.get('totalDebt')
-        total_cash = info.get('totalCash')
-        
-        if total_debt is not None and total_cash is not None:
-            return total_debt - total_cash
-        return None
+        try:
+            info = self.ticker.info
+            total_debt = info.get('totalDebt')
+            total_cash = info.get('totalCash')
+            
+            # Default to 0.0 if None (common for debt-free companies)
+            debt_val = float(total_debt) if total_debt is not None else 0.0
+            cash_val = float(total_cash) if total_cash is not None else 0.0
+            
+            return debt_val - cash_val
+        except Exception as e:
+            print(f"Error calculating net debt for {self.ticker_symbol}: {e}")
+            return 0.0
 
 if __name__ == "__main__":
     # Quick sanity check

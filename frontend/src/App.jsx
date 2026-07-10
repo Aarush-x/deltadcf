@@ -4,7 +4,8 @@ import LandingPage from "./components/LandingPage";
 import AnalysisPage from "./components/AnalysisPage";
 
 async function fetchAnalysis(ticker) {
-  const res = await fetch(`http://localhost:8000/api/analyze/${ticker}`);
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const res = await fetch(`${apiBase}/api/analyze/${ticker}`);
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Analysis failed");

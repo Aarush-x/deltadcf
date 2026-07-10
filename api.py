@@ -35,9 +35,15 @@ FULL_CHECKLIST_TEXT = """
 
 app = FastAPI()
 
+cors_origins_str = os.getenv("CORS_ALLOWED_ORIGINS")
+if cors_origins_str:
+    cors_origins = [orig.strip() for orig in cors_origins_str.split(",") if orig.strip()]
+else:
+    cors_origins = ["http://localhost:5173", "http://localhost:3000", "http://localhost:3001"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:3001"],
+    allow_origins=cors_origins,
     allow_methods=["GET"],
     allow_headers=["*"],
 )
@@ -154,17 +160,21 @@ async def analyze(ticker: str):
 
     try:
         api_key = os.getenv("GOOGLE_API_KEY")
+        ollama_model = os.getenv("OLLAMA_MODEL", "gemma-4-12b-it-qat-q4_0")
+        ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
         fetcher = FinancialDataFetcher(ticker_symbol)
         fcf_history = fetcher.get_free_cash_flow()
         shares = fetcher.get_shares_outstanding()
         net_debt = fetcher.get_net_debt()
 
-        if not fcf_history or not shares or net_debt is None:
+        if not fcf_history or not shares:
             raise HTTPException(
                 status_code=404,
                 detail=f"Could not retrieve financial data for {ticker_symbol}. Verify the ticker is valid.",
             )
+        if net_debt is None:
+            net_debt = 0.0
 
         latest_date = max(fcf_history.keys())
         initial_fcf = fcf_history[latest_date]
@@ -175,7 +185,7 @@ async def analyze(ticker: str):
         quantitative_checklist = transform_checklist_results(checklist_obj.results)
 
         processor = ReportProcessor(ticker_symbol)
-        ai = AIResearcher(api_key=api_key)
+        ai = AIResearcher(api_key=api_key, model_name=ollama_model, base_url=ollama_url)
 
         mda_text = get_mda_text(ticker_symbol, processor)
 
@@ -207,7 +217,7 @@ async def analyze(ticker: str):
 
         currency = "INR" if ticker_symbol.endswith(".NS") or ticker_symbol.endswith(".BO") else "USD"
 
-        return {
+        result = {
             "ticker": ticker_symbol,
             "currency": currency,
             "quantitative_checklist": quantitative_checklist,
@@ -237,7 +247,11 @@ async def analyze(ticker: str):
             },
         }
 
+        return result
+
     except HTTPException:
         raise
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

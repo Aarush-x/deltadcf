@@ -97,10 +97,16 @@ class ReportProcessor:
 
 class AIResearcher:
     """
-    Pass 2 & 3: The Researcher and The Adjuster using Gemini 2.0 Flash.
+    Pass 2 & 3: The Researcher and The Adjuster using local Ollama OR Google Gemini API.
     """
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, 
+                 api_key: Optional[str] = None, 
+                 model_name: str = "gemma-4-12b-it-qat-q4_0", 
+                 base_url: str = "http://localhost:11434"):
+        self.model_name = model_name
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
         if api_key:
             self.client = genai.Client(api_key=api_key)
         else:
@@ -119,7 +125,7 @@ class AIResearcher:
         }
 
     def parse_structured_response(self, raw: str) -> Dict:
-        """Parse JSON from Gemini response, stripping markdown fences if present."""
+        """Parse JSON from model response, stripping markdown fences if present."""
         text = raw.strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -144,11 +150,8 @@ class AIResearcher:
     def analyze_checklist(self, context_text: str, checklist: str) -> Dict:
         """
         Expert Analysis with 'Red Flag Filter' and Governance Audit.
-        Returns structured JSON matching the valuation schema.
+        Returns structured JSON matching the valuation schema from either Gemini Cloud or local Ollama.
         """
-        if not self.client:
-            return self.empty_response()
-
         prompt = f"""
         You are a Senior Equity Researcher and Governance Expert.
         Audit the provided text from an Annual Report against this checklist:
@@ -188,14 +191,36 @@ class AIResearcher:
         Include all 10 checklist items in core_business_audit with ids 1 through 10.
         """
         
+        # 1. Use Google Gemini Cloud if API key is provided
+        if self.client:
+            print("AI Auditing Layer: Using Google Gemini (Cloud)...")
+            try:
+                response = self.client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                )
+                return self.parse_structured_response(response.text)
+            except Exception as e:
+                print(f"Gemini Cloud AI Analysis Error: {e}")
+                return self.empty_response()
+        
+        # 2. Otherwise fallback to local Ollama
+        print(f"AI Auditing Layer: Using local Ollama ({self.model_name})...")
         try:
-            response = self.client.models.generate_content(
-                model="gemini-flash-latest",
-                contents=prompt,
-            )
-            return self.parse_structured_response(response.text)
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json"
+            }
+            url = f"{self.base_url}/api/generate"
+            response = requests.post(url, json=payload, timeout=90)
+            response.raise_for_status()
+            response_json = response.json()
+            response_text = response_json.get("response", "")
+            return self.parse_structured_response(response_text)
         except Exception as e:
-            print(f"AI Analysis Error: {e}")
+            print(f"Ollama local AI Analysis Error: {e}")
             return self.empty_response()
 
 if __name__ == "__main__":

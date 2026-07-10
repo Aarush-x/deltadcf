@@ -10,6 +10,8 @@ class DCFEngine:
                  growth_stages: List[Tuple[int, float]], # List of (years, rate)
                  terminal_rate: float, 
                  discount_rate: float):
+        if discount_rate <= terminal_rate:
+            raise ValueError("Discount rate must be strictly greater than the terminal rate to calculate a stable terminal value.")
         self.initial_fcf = initial_fcf
         self.growth_stages = growth_stages
         self.terminal_rate = terminal_rate
@@ -49,6 +51,8 @@ class DCFEngine:
                                   net_debt: float, 
                                   shares_outstanding: int) -> float:
         """Calculates price per share: (Equity Value) / Shares."""
+        if not shares_outstanding or shares_outstanding <= 0:
+            raise ValueError("Shares outstanding must be greater than zero.")
         equity_value = intrinsic_value - net_debt
         return equity_value / shares_outstanding
 
