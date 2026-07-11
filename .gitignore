@@ -6,5 +6,8 @@ __pycache__/
 *.pyc
 TODOS.md
 GEMINI.md
-TODOS.md
+T0D0S.md
 .gstack/
+docs/
+.pytest_cache/
+.coverage
