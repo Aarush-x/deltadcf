@@ -103,12 +103,22 @@ class AIResearcher:
     def __init__(self, 
                  api_key: Optional[str] = None, 
                  model_name: str = "gemma-4-12b-it-qat-q4_0", 
-                 base_url: str = "http://localhost:11434"):
-        self.model_name = model_name
-        self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
+                 base_url: str = "http://localhost:11434",
+                 provider: str = "auto"):
+        # Clean model_name & base_url (remove quotes if loaded from .env)
+        self.model_name = model_name.strip().strip("'").strip('"') if model_name else "gemma-4-12b-it-qat-q4_0"
+        self.base_url = base_url.strip().strip("'").strip('"').rstrip("/") if base_url else "http://localhost:11434"
+        self.provider = provider.strip().strip("'").strip('"').lower() if provider else "auto"
+        
+        # Clean api_key (handles empty quotes '""' in .env)
+        self.api_key = None
         if api_key:
-            self.client = genai.Client(api_key=api_key)
+            clean_key = api_key.strip().strip("'").strip('"')
+            if clean_key and clean_key.upper() not in ["NONE", "NULL", "FALSE", ""]:
+                self.api_key = clean_key
+                
+        if self.api_key and self.provider != "ollama":
+            self.client = genai.Client(api_key=self.api_key)
         else:
             self.client = None
 
@@ -194,15 +204,28 @@ class AIResearcher:
         # 1. Use Google Gemini Cloud if API key is provided
         if self.client:
             print("AI Auditing Layer: Using Google Gemini (Cloud)...")
-            try:
-                response = self.client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=prompt,
-                )
-                return self.parse_structured_response(response.text)
-            except Exception as e:
-                print(f"Gemini Cloud AI Analysis Error: {e}")
-                return self.empty_response()
+            models_to_try = [
+                "gemini-3.5-flash",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-2.5-pro",
+                "gemini-2.3-pro",
+                "gemini-2.3-flash-lite"
+            ]
+            for model in models_to_try:
+                try:
+                    print(f"  Attempting with model: {model}")
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                    )
+                    return self.parse_structured_response(response.text)
+                except Exception as e:
+                    print(f"  Model {model} failed: {e}")
+            
+            print("  All Gemini Cloud models exhausted or failed.")
+            return self.empty_response()
         
         # 2. Otherwise fallback to local Ollama
         print(f"AI Auditing Layer: Using local Ollama ({self.model_name})...")

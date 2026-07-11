@@ -162,6 +162,7 @@ async def analyze(ticker: str):
         api_key = os.getenv("GOOGLE_API_KEY")
         ollama_model = os.getenv("OLLAMA_MODEL", "gemma-4-12b-it-qat-q4_0")
         ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ai_provider = os.getenv("AI_PROVIDER", "auto")
 
         fetcher = FinancialDataFetcher(ticker_symbol)
         fcf_history = fetcher.get_free_cash_flow()
@@ -185,7 +186,12 @@ async def analyze(ticker: str):
         quantitative_checklist = transform_checklist_results(checklist_obj.results)
 
         processor = ReportProcessor(ticker_symbol)
-        ai = AIResearcher(api_key=api_key, model_name=ollama_model, base_url=ollama_url)
+        ai = AIResearcher(
+            api_key=api_key,
+            model_name=ollama_model,
+            base_url=ollama_url,
+            provider=ai_provider
+        )
 
         mda_text = get_mda_text(ticker_symbol, processor)
 
