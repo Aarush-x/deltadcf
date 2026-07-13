@@ -14,6 +14,17 @@ def test_dcf_intrinsic_value_simple():
     assert iv > 0
     assert isinstance(iv, float)
 
+
+def test_dcf_regression_baseline_is_unchanged():
+    engine = DCFEngine(
+        initial_fcf=100.0,
+        growth_stages=[(5, 0.18), (5, 0.10)],
+        terminal_rate=0.03,
+        discount_rate=0.09,
+    )
+
+    assert engine.calculate_intrinsic_value() == pytest.approx(4074.259247636977)
+
 def test_dcf_price_per_share():
     stages = [(5, 0.10)]
     engine = DCFEngine(100, stages, 0.03, 0.08)

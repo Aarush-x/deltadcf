@@ -7,13 +7,8 @@ reports/
 cache/
 __pycache__/
 *.py[cod]
-node_modules/
-dist/
-TODOS.md
-GEMINI.md
-T0D0S.md
-.gstack/
-docs/
 .pytest_cache/
 .coverage
 htmlcov/
+tests/
+requirements-dev.txt

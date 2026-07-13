@@ -1,5 +1,5 @@
 import requests
-from typing import Optional, List, Dict
+from typing import Optional
 import time
 
 class NSEFetcher:
@@ -8,7 +8,8 @@ class NSEFetcher:
     Requires session/cookie management to bypass bot protection.
     """
     
-    def __init__(self):
+    def __init__(self, timeout: int = 10):
+        self.timeout = timeout
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
@@ -24,7 +25,11 @@ class NSEFetcher:
         if not self.cookies_initialized:
             print("Initializing NSE session...")
             try:
-                self.session.get("https://www.nseindia.com", headers=self.headers, timeout=10)
+                self.session.get(
+                    "https://www.nseindia.com",
+                    headers=self.headers,
+                    timeout=self.timeout,
+                )
                 self.cookies_initialized = True
             except Exception as e:
                 print(f"Failed to initialize NSE session: {e}")
@@ -40,7 +45,9 @@ class NSEFetcher:
         try:
             # Adding a small delay to avoid aggressive rate limiting
             time.sleep(1)
-            response = self.session.get(api_url, headers=self.headers, timeout=10)
+            response = self.session.get(
+                api_url, headers=self.headers, timeout=self.timeout
+            )
             
             if response.status_code == 200:
                 try:

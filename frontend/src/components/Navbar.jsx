@@ -6,19 +6,21 @@ export default function Navbar({
   onTickerInputChange,
   onSubmit,
   onLogoClick,
+  isSubmitting,
   isDark,
   onToggleTheme,
 }) {
   const [flash, setFlash] = useState(false);
 
   const handleSubmit = () => {
+    if (isSubmitting) return;
     setFlash(true);
     setTimeout(() => setFlash(false), 150);
     onSubmit();
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === "Enter") handleSubmit();
+    if (e.key === "Enter" && !isSubmitting) handleSubmit();
   };
 
   return (
@@ -41,6 +43,7 @@ export default function Navbar({
             value={tickerInput}
             onChange={(e) => onTickerInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
+            disabled={isSubmitting}
           />
           <button
             className={`font-data-md text-data-md px-4 h-9 whitespace-nowrap transition-colors ${
@@ -49,8 +52,10 @@ export default function Navbar({
                 : "bg-action-blue text-white hover:bg-blue-600"
             }`}
             onClick={handleSubmit}
+            disabled={isSubmitting}
+            aria-busy={isSubmitting}
           >
-            ANALYZE →
+            {isSubmitting ? "ANALYZING…" : "ANALYZE →"}
           </button>
         </div>
       </div>

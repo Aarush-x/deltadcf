@@ -1,6 +1,10 @@
 import requests
-from typing import Optional, Dict
+from typing import Optional
 import time
+
+
+def clean_bse_symbol(symbol: str) -> str:
+    return symbol.upper().removesuffix(".NS").removesuffix(".BO")
 
 class BSEFetcher:
     """
@@ -8,7 +12,8 @@ class BSEFetcher:
     Dynamically resolves Tickers to BSE Scrip Codes.
     """
     
-    def __init__(self):
+    def __init__(self, timeout: int = 10):
+        self.timeout = timeout
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
             "Referer": "https://www.bseindia.com/",
@@ -18,12 +23,14 @@ class BSEFetcher:
 
     def get_scrip_code(self, symbol: str) -> Optional[str]:
         """Searches BSE for the Scrip Code of a given symbol."""
-        clean_symbol = symbol.replace(".NS", "").upper()
+        clean_symbol = clean_bse_symbol(symbol)
         search_url = f"https://api.bseindia.com/BseIndiaAPI/api/StockReachGraph/w?scripcode={clean_symbol}&flag=0&fromdate=&todate="
         
         try:
             # We use the StockReach API which often resolves the symbol to scrip code
-            response = self.session.get(search_url, headers=self.headers, timeout=10)
+            response = self.session.get(
+                search_url, headers=self.headers, timeout=self.timeout
+            )
             if response.status_code == 200:
                 # If we get a response, the URL often contains the numeric scrip code in redirects 
                 # or metadata. Alternatively, we use a general search.
@@ -31,7 +38,9 @@ class BSEFetcher:
             
             # General Search API for Scrip Code
             search_api = f"https://api.bseindia.com/BseIndiaAPI/api/getScCode/w?text={clean_symbol}"
-            response = self.session.get(search_api, headers=self.headers, timeout=10)
+            response = self.session.get(
+                search_api, headers=self.headers, timeout=self.timeout
+            )
             if response.status_code == 200:
                 try:
                     data = response.json()
@@ -51,7 +60,7 @@ class BSEFetcher:
 
     def get_latest_annual_report_url(self, symbol: str) -> Optional[str]:
         """Fetches the latest annual report PDF URL from BSE India."""
-        clean_symbol = symbol.replace(".NS", "").upper()
+        clean_symbol = clean_bse_symbol(symbol)
         scrip_code = self.get_scrip_code(clean_symbol)
         
         if not scrip_code:
@@ -67,7 +76,12 @@ class BSEFetcher:
             
             print(f"Searching BSE for {clean_symbol} ({scrip_code}) report ({year_str})...")
             try:
-                response = self.session.get(api_url, params=params, headers=self.headers, timeout=10)
+                response = self.session.get(
+                    api_url,
+                    params=params,
+                    headers=self.headers,
+                    timeout=self.timeout,
+                )
                 if response.status_code == 200:
                     try:
                         data = response.json()

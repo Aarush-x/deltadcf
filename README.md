@@ -1,109 +1,197 @@
-# DeltaDCF - Fundamental Analysis Tool
+# DeltaDCF
 
-DeltaDCF is an equity research platform that combines quantitative Discounted Cash Flow (DCF) modeling with AI-powered qualitative auditing. The tool automatically fetches financial data, parses annual reports, and performs valuation audits with parameter adjustments based on business risks.
+DeltaDCF is an equity-research application that combines a quantitative discounted cash flow model with optional AI-assisted annual-report auditing. It supports US securities through yfinance and SEC filings, plus Indian securities through NSE/BSE report sources.
 
-## Core Features
-
-*   **Quantitative Checklist**: Automatically validates key financial metrics including Gross Profit Margins, Debt to Asset ratios, and Return on Equity (ROE).
-*   **Dual-Provider AI Brain**: Performs qualitative audits on Management Discussion and Analysis (MD&A) sections using either a local Ollama model (Gemma 12B) or Google Gemini (Gemini 2.0 Flash) in the cloud.
-*   **Dynamic DCF Engine**: Calculates intrinsic value with parameters (growth rates and discount rates) that are adjusted dynamically based on AI audit findings.
-*   **Multi-Market Support**: Support for US stocks (via SEC filings) and Indian stocks (via NSE and BSE filings).
-*   **Robust Math Engine**: Mathematical validations to prevent division by zero, handle debt-free companies gracefully, and handle shares outstanding errors.
+The DCF formulas and baseline assumptions remain in `backend/src/analysis/dcf.py` and `backend/api.py`. The production configuration in this repository changes deployment, validation, failure handling, and operational safety; it does not redesign the valuation model.
 
 ## Architecture
 
-The project has a decoupled architecture:
+| Component | Directory | Production runtime | Responsibility |
+| --- | --- | --- | --- |
+| Web UI | `frontend/` | Vercel | Vite + React interface; calls the configured API |
+| API | `backend/` | Render Docker web service | FastAPI orchestration, report processing, AI audit, and DCF response |
+| CI | `.github/workflows/ci.yml` | GitHub Actions | Backend tests, frontend build, and Docker build |
 
-*   **Frontend**: React (Vite) with Tailwind CSS for a terminal-inspired high data density UI dashboard.
-*   **Backend**: FastAPI (Python) for financial logic, DCF calculations, and AI orchestration.
-*   **Data Fetchers**:
-    *   yfinance: For historical free cash flow, outstanding shares, and balance sheet metrics.
-    *   edgartools: For direct access to SEC 10-K filings.
-    *   NSE/BSE Fetchers: Custom scrapers for Indian annual reports.
-    *   PyMuPDF: For extracting text from PDF reports.
+The API entry point is `backend/api.py` (`api:app`). `GET /api/analyze/{ticker}` resolves the symbol, fetches financial statements through yfinance, runs the quantitative checklist, obtains report text from SEC/NSE/BSE or an optional local PDF, calls the selected AI provider when report text exists, and applies the resulting offsets to the existing DCF calculation. `GET /health` is a dependency-free liveness endpoint.
 
-## Setup Instructions
+External services are failure domains. yfinance, SEC/edgartools, NSE, BSE, Google Gemini, local Ollama, and third-party PDF responses can be slow, rate-limited, unavailable, or change behavior without notice. Downloaded reports are size-limited, stored in the operating system's temporary directory, and deleted after processing. A local `reports/` directory is optional and is not required on Render.
 
-### Prerequisites
-*   Python 3.10 or higher
-*   Node.js 18 or higher
-*   Ollama (optional, for local model execution)
-*   Google AI Studio API Key (optional, for cloud model execution)
+## Local setup
 
-### 1. Environment Configuration
-Create a `.env` file in the root directory of the project with the following keys:
-```text
-GOOGLE_API_KEY="your_optional_gemini_api_key"
-OLLAMA_MODEL="gemma-4-12b-it-qat-q4_0"
-OLLAMA_BASE_URL="http://localhost:11434"
-CORS_ALLOWED_ORIGINS="http://localhost:5173,http://localhost:3000,http://localhost:3001"
+### Backend
+
+Python 3.11 or later is recommended.
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+cp .env.example .env
+python api.py
 ```
-*Note: If GOOGLE_API_KEY is defined, the system defaults to using Gemini Cloud. If it is empty, the system falls back to using the local Ollama Gemma instance.*
 
-### 2. Local Ollama Model Setup (Optional)
-If using the local Gemma model:
-1. Download the Gemma 12B Q4 GGUF file.
-2. Navigate to your download folder and create a Modelfile:
-   ```bash
-   echo "FROM ./gemma-4-12b-it-qat-q4_0.gguf" > Modelfile
-   ```
-3. Register the model in Ollama:
-   ```bash
-   ollama create gemma-4-12b-it-qat-q4_0 -f Modelfile
-   ```
-4. Verify registration:
-   ```bash
-   ollama list
-   ```
+The backend listens on `http://localhost:8000`. Verify it with:
 
-### 3. Backend Setup
-1. Create and activate a virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Start the FastAPI development backend server:
-   ```bash
-   fastapi dev api.py --port 8000
-   ```
+```bash
+curl --fail http://localhost:8000/health
+```
 
-### 4. Docker Backend Setup (Alternative)
-If you prefer running the backend in a containerized environment (for deployment testing):
-1. Build the Docker image:
-   ```bash
-   docker build -t deltadcf-backend .
-   ```
-2. Run the container:
-   ```bash
-   docker run -p 8000:8000 --env-file .env deltadcf-backend
-   ```
+For local AI analysis, either set `GOOGLE_API_KEY` and `AI_PROVIDER=gemini`, or run Ollama and use `AI_PROVIDER=ollama`. `AI_PROVIDER=auto` is a development-only convenience: it uses Gemini when a key exists and otherwise attempts local Ollama.
 
-### 5. Frontend Setup
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the Vite React development server:
-   ```bash
-   npm run dev -- --port 3001
-   ```
+### Frontend
 
-## Usage
+Node.js 22 is recommended.
 
-1. Open http://localhost:3001 in your web browser.
-2. Enter a stock ticker:
-   *   For US stocks: Enter standard symbols like AAPL, MSFT, or TSLA.
-   *   For Indian stocks: Append the exchange suffix, such as INFY.NS or RELIANCE.NS.
-3. For Indian stocks requiring qualitative analysis, place the annual report PDF in the `reports/` folder named as `{TICKER}_annual_report.pdf` (e.g. `INFY_annual_report.pdf`) to bypass scraper blocking checks.
+```bash
+cd frontend
+npm ci
+cp .env.example .env.local
+npm run dev
+```
 
-## Disclaimer
+The local frontend defaults to `http://localhost:8000` only in Vite development mode. A production build stops with a clear error when `VITE_API_URL` is missing.
 
-This tool is for educational and research purposes only. Valuation results are based on historical data and AI interpretations, which may be non-deterministic. This is not financial advice.
+## Environment variables
+
+### Backend
+
+| Variable | Production | Purpose |
+| --- | --- | --- |
+| `APP_ENV` | `production` | Selects production-safe defaults and validation |
+| `LOG_LEVEL` | `INFO` | Python logging level |
+| `PORT` | Set automatically by Render | Uvicorn listen port; defaults to `8000` locally |
+| `GOOGLE_API_KEY` | Required when AI report analysis is expected | Server-side Gemini credential; never expose through Vite |
+| `AI_PROVIDER` | `gemini` | Production permits the cloud provider only |
+| `CORS_ALLOWED_ORIGINS` | Required | Comma-separated exact frontend origins, with no wildcard |
+| `OLLAMA_MODEL` | Local only | Optional local Ollama model name |
+| `OLLAMA_BASE_URL` | Local only | Optional local Ollama URL |
+| `SEC_IDENTITY` | Recommended | Honest edgartools identity, such as `DeltaDCF you@example.com` |
+| `REPORTS_DIR` | Optional | Local PDF fallback directory; defaults to `reports` |
+| `EXTERNAL_REQUEST_TIMEOUT_SECONDS` | Optional | External HTTP timeout; defaults to `60` |
+| `MAX_REPORT_BYTES` | Optional | Maximum downloaded PDF size; defaults to 25 MiB |
+
+In production, `AI_PROVIDER=ollama`, `AI_PROVIDER=auto`, and wildcard CORS are rejected at startup. The health endpoint remains available when `GOOGLE_API_KEY` is unset, but an analysis that requires Gemini returns a safe `503` until the key is configured.
+
+### Frontend
+
+The only Vercel variable is:
+
+```text
+VITE_API_URL=https://your-render-service.onrender.com
+```
+
+Do not add `GOOGLE_API_KEY`, provider credentials, or any backend secret to a `VITE_*` variable because Vite embeds those values in the browser bundle.
+
+## Docker
+
+Build from the repository root so the Docker context matches CI and Render:
+
+```bash
+docker build -f backend/Dockerfile -t deltadcf-backend .
+```
+
+Run the production image:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e PORT=8000 \
+  -e APP_ENV=production \
+  -e LOG_LEVEL=INFO \
+  -e AI_PROVIDER=gemini \
+  -e CORS_ALLOWED_ORIGINS=http://localhost:4173 \
+  -e GOOGLE_API_KEY=your_key_here \
+  -e SEC_IDENTITY="DeltaDCF you@example.com" \
+  deltadcf-backend
+```
+
+Then check:
+
+```bash
+curl --fail http://localhost:8000/health
+```
+
+The image uses a slim Python base, caches dependency installation before application code, runs as an unprivileged user, honors `${PORT:-8000}`, and includes an internal health check. Secrets are runtime environment variables and are not copied into the image.
+
+## Render deployment
+
+The root `render.yaml` defines a Docker web service with the root Docker context, `backend/Dockerfile`, `/health`, and automatic deployment after GitHub checks pass.
+
+1. Push this branch and open a pull request instead of merging directly to `main`.
+2. In Render, choose **New > Blueprint** and connect the GitHub repository.
+3. Select the repository and allow Render to read the root `render.yaml`.
+4. Supply the prompted variables:
+   - `GOOGLE_API_KEY`: a valid server-side Gemini key.
+   - `CORS_ALLOWED_ORIGINS`: the exact Vercel production origin, for example `https://deltadcf.vercel.app`. Add preview origins as comma-separated values only when they are intentionally trusted.
+   - `SEC_IDENTITY`: the application name and a monitored contact email.
+5. Create the Blueprint and wait for the Docker build and `/health` check to pass.
+6. Copy the final `https://<service>.onrender.com` URL into Vercel as `VITE_API_URL`.
+
+Render injects `PORT`; do not hardcode it. The service has no persistent disk requirement. Local report files are optional, and exchange downloads are temporary.
+
+## Vercel deployment
+
+Create a Vercel project from the same GitHub repository with these settings:
+
+- **Root Directory:** `frontend`
+- **Framework Preset:** Vite
+- **Build Command:** `npm run build`
+- **Output Directory:** `dist`
+- **Environment Variable:** `VITE_API_URL=https://your-render-service.onrender.com`
+
+No `vercel.json` is needed because this UI has no client-side route paths that require SPA rewrites. Git integration creates previews for non-production branches; validate a preview before promoting or merging it. The Vercel environment must contain no backend secrets.
+
+After Vercel assigns the production domain, update `CORS_ALLOWED_ORIGINS` in Render and redeploy the backend. Include only origins that should be able to call the API from browsers.
+
+## Testing and CI
+
+Run the same checks locally:
+
+```bash
+cd backend
+python -m pytest
+
+cd ../frontend
+npm ci
+VITE_API_URL=https://example.invalid npm run build
+
+cd ..
+docker build -f backend/Dockerfile -t deltadcf-backend .
+```
+
+CI mocks external services and never calls paid APIs. Backend coverage includes health, invalid ticker validation, missing report directories, provider failures, safe error bodies, mocked successful response shape, parser behavior, and DCF regression behavior.
+
+To confirm the production build guard works:
+
+```bash
+cd frontend
+env -u VITE_API_URL npm run build
+```
+
+That command is expected to fail with `VITE_API_URL is required for production builds`.
+
+## Troubleshooting
+
+- **Browser reports a provider failure:** Check Render logs for the server-side exception category. Confirm Gemini quota/key status and upstream market-data availability. User responses intentionally omit raw provider messages.
+- **CORS error:** Set `CORS_ALLOWED_ORIGINS` to the exact Vercel origin, including `https://` and excluding a trailing slash, then redeploy Render.
+- **Frontend build fails immediately:** Set `VITE_API_URL` for the Vercel environment or the local production-build command.
+- **Render health check fails:** Confirm the container is using Render's injected `PORT` and that the Docker command has not been overridden.
+- **Indian report audit is empty:** NSE/BSE endpoints may be blocking automation or may not expose a report. For local development, place a trusted PDF in `backend/reports/` with a ticker prefix such as `INFY_annual_report.pdf`.
+- **SEC access fails:** Set an honest `SEC_IDENTITY` and check SEC availability and rate limits.
+
+## Known limitations
+
+- Analysis is synchronous and request-scoped. FastAPI runs it in a worker thread so it does not block the event loop, but there is no queue, shared result cache, or durable job state.
+- Total analysis latency depends on several third-party providers and can exceed a frontend request timeout during outages or cold starts.
+- Render's filesystem is treated as ephemeral; user-managed report persistence is intentionally not part of this deployment.
+- NSE/BSE scraping and report URL formats can change without notice.
+- AI output is probabilistic. If no report text can be obtained, the DCF still runs with zero qualitative offsets, matching the existing fallback behavior.
+- The fixed DCF assumptions are product choices, not individualized forecasts.
+
+## Rollback
+
+For application changes, redeploy the last known-good Git commit in Render and use Vercel's deployment history to promote the previous frontend deployment. If configuration caused the incident, restore the previous Render environment values and Vercel `VITE_API_URL`, then redeploy both services. Never roll back by reintroducing a leaked credential; rotate it first.
+
+## Financial disclaimer
+
+DeltaDCF is for educational and research purposes only. Its market data may be delayed or inaccurate, and its valuations and AI interpretations may be incomplete, non-deterministic, or wrong. Nothing produced by this software is financial, investment, tax, or legal advice. Verify all source data and consult a qualified professional before making financial decisions.

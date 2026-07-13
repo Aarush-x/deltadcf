@@ -1,7 +1,12 @@
 import yfinance as yf
 import pandas as pd
 from typing import Dict, Optional, Any
-import json
+import logging
+
+from errors import ExternalServiceError
+
+
+logger = logging.getLogger(__name__)
 
 class FinancialDataFetcher:
     """
@@ -25,9 +30,13 @@ class FinancialDataFetcher:
                 fcf.index = fcf.index.astype(str)
                 return fcf.head(years).to_dict()
             return None
-        except Exception as e:
-            print(f"Error fetching FCF for {self.ticker_symbol}: {e}")
-            return None
+        except Exception as exc:
+            logger.warning(
+                "Free cash flow provider failed for %s",
+                self.ticker_symbol,
+                exc_info=True,
+            )
+            raise ExternalServiceError("Free cash flow provider failed") from exc
 
     def get_checklist_metrics(self) -> Dict[str, Any]:
         """Retrieves quantitative metrics for the Research Checklist."""
@@ -62,13 +71,23 @@ class FinancialDataFetcher:
                 metrics['inventory'] = latest_bs.get('Inventory')
                 metrics['receivables'] = latest_bs.get('Net Receivables')
                 
-        except Exception as e:
-            print(f"Error extracting checklist metrics: {e}")
+        except Exception:
+            logger.warning(
+                "Checklist metric extraction failed for %s",
+                self.ticker_symbol,
+                exc_info=True,
+            )
             
         return metrics
 
     def get_shares_outstanding(self) -> Optional[int]:
-        return self.ticker.info.get('sharesOutstanding')
+        try:
+            return self.ticker.info.get('sharesOutstanding')
+        except Exception as exc:
+            logger.warning(
+                "Shares provider failed for %s", self.ticker_symbol, exc_info=True
+            )
+            raise ExternalServiceError("Shares provider failed") from exc
 
     def get_net_debt(self) -> Optional[float]:
         try:
@@ -81,9 +100,11 @@ class FinancialDataFetcher:
             cash_val = float(total_cash) if total_cash is not None else 0.0
             
             return debt_val - cash_val
-        except Exception as e:
-            print(f"Error calculating net debt for {self.ticker_symbol}: {e}")
-            return 0.0
+        except Exception as exc:
+            logger.warning(
+                "Net debt provider failed for %s", self.ticker_symbol, exc_info=True
+            )
+            raise ExternalServiceError("Net debt provider failed") from exc
 
 if __name__ == "__main__":
     # Quick sanity check

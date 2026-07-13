@@ -1,11 +1,34 @@
 import json
+import logging
+import math
 import os
 import re
+import tempfile
 import requests
 import fitz  # PyMuPDF
-from typing import List, Dict, Optional
+from pathlib import Path
+from typing import Dict, Optional
+from urllib.parse import urlparse
+
 from edgar import Company, set_identity
 from google import genai
+
+from errors import AIProviderError
+
+
+logger = logging.getLogger(__name__)
+ALLOWED_REPORT_HOSTS = {
+    "www.bseindia.com",
+    "bseindia.com",
+    "nsearchives.nseindia.com",
+    "www.nseindia.com",
+    "nseindia.com",
+}
+VALUATION_OFFSET_BOUNDS = {
+    "stage_1_growth_offset": (-0.15, 0.15),
+    "stage_2_growth_offset": (-0.08, 0.08),
+    "discount_rate_offset": (-0.05, 0.10),
+}
 
 class ReportProcessor:
     """
@@ -13,13 +36,19 @@ class ReportProcessor:
     Supports SEC (US) via edgartools and PDF (Global/Nifty 50) via scraping.
     """
     
-    def __init__(self, ticker: str, reports_dir: str = "reports"):
+    def __init__(
+        self,
+        ticker: str,
+        reports_dir: str | Path = "reports",
+        timeout: int = 60,
+        max_report_bytes: int = 25 * 1024 * 1024,
+        sec_identity: str = "DeltaDCF support@example.com",
+    ):
         self.ticker = ticker
-        self.reports_dir = reports_dir
-        os.makedirs(reports_dir, exist_ok=True)
-        # Required by SEC
-        set_identity("Gemini Analyst analyst@gemini-cli.ai")
-        # Session for robust downloads
+        self.reports_dir = Path(reports_dir)
+        self.timeout = timeout
+        self.max_report_bytes = max_report_bytes
+        set_identity(sec_identity)
         self.session = requests.Session()
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -28,7 +57,7 @@ class ReportProcessor:
     def get_sec_mda(self) -> Optional[str]:
         """Fetches MD&A and Proxy Statement (for governance) from SEC."""
         try:
-            print(f"Fetching SEC filings for {self.ticker}...")
+            logger.info("Fetching SEC filings for %s", self.ticker)
             company = Company(self.ticker)
             tenk = company.get_filings(form="10-K").latest().obj()
             mda_text = tenk['Item 7']
@@ -37,43 +66,80 @@ class ReportProcessor:
             gov_text = ""
             try:
                 gov_text = f"\n[GOVERNANCE DATA]\n{tenk['Item 11']}\n{tenk['Item 13']}"
-            except:
+            except (KeyError, TypeError):
                 pass
                 
             return (str(mda_text) + gov_text)[:30000]
-        except Exception as e:
-            print(f"Error fetching SEC filings: {e}")
+        except Exception:
+            logger.warning("SEC filing lookup failed for %s", self.ticker, exc_info=True)
             return None
 
-    def download_report(self, url: str) -> str:
-        """Downloads a PDF report using robust session management."""
-        file_path = os.path.join(self.reports_dir, f"{self.ticker.replace('.NS', '')}_annual_report.pdf")
-        if os.path.exists(file_path):
-            return file_path
+    def download_report(self, url: str) -> Path | None:
+        """Download a bounded PDF to a temporary file from an approved exchange host."""
+        parsed_url = urlparse(url)
+        if parsed_url.scheme != "https" or parsed_url.hostname not in ALLOWED_REPORT_HOSTS:
+            logger.warning("Rejected report URL from unapproved host")
+            return None
+
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix="deltadcf-report-", suffix=".pdf"
+        )
+        os.close(file_descriptor)
+        file_path = Path(temporary_name)
         try:
             parent_url = "/".join(url.split("/")[:-1])
-            self.session.get(parent_url, headers=self.headers, timeout=10)
-            response = self.session.get(url, stream=True, timeout=30, headers=self.headers)
+            self.session.get(parent_url, headers=self.headers, timeout=self.timeout)
+            response = self.session.get(
+                url,
+                stream=True,
+                timeout=self.timeout,
+                headers=self.headers,
+                allow_redirects=True,
+            )
             response.raise_for_status()
-            with open(file_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            return file_path
-        except Exception as e:
-            print(f"Error downloading report: {e}")
-            return ""
+            final_url = urlparse(response.url)
+            if final_url.scheme != "https" or final_url.hostname not in ALLOWED_REPORT_HOSTS:
+                raise ValueError("Report redirect target is not approved")
+            content_type = response.headers.get("Content-Type", "").lower()
+            if "pdf" not in content_type and not parsed_url.path.lower().endswith(".pdf"):
+                raise ValueError("Report response is not a PDF")
 
-    def extract_text_from_pdf(self, pdf_path: str) -> str:
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > self.max_report_bytes:
+                raise ValueError("Report exceeds the configured size limit")
+
+            total_bytes = 0
+            with file_path.open("wb") as report_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    total_bytes += len(chunk)
+                    if total_bytes > self.max_report_bytes:
+                        raise ValueError("Report exceeds the configured size limit")
+                    report_file.write(chunk)
+            return file_path
+        except Exception:
+            logger.warning("Annual report download failed", exc_info=True)
+            self.cleanup_download(file_path)
+            return None
+
+    @staticmethod
+    def cleanup_download(file_path: str | Path) -> None:
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove temporary report", exc_info=True)
+
+    def extract_text_from_pdf(self, pdf_path: str | Path) -> str:
         """Extracts text from PDF (reads first 150 pages to cover MD&A and Governance)."""
         try:
-            doc = fitz.open(pdf_path)
-            text = ""
-            for i in range(min(len(doc), 150)): 
-                text += doc[i].get_text() + "\n"
-            doc.close()
-            return text
-        except Exception as e:
-            print(f"Error reading PDF: {e}")
+            with fitz.open(pdf_path) as document:
+                return "\n".join(
+                    document[index].get_text()
+                    for index in range(min(len(document), 150))
+                )
+        except Exception:
+            logger.warning("PDF extraction failed", exc_info=True)
             return ""
 
     def get_key_sections(self, full_text: str) -> Dict[str, str]:
@@ -104,11 +170,13 @@ class AIResearcher:
                  api_key: Optional[str] = None, 
                  model_name: str = "gemma-4-12b-it-qat-q4_0", 
                  base_url: str = "http://localhost:11434",
-                 provider: str = "auto"):
+                 provider: str = "auto",
+                 timeout: int = 60):
         # Clean model_name & base_url (remove quotes if loaded from .env)
         self.model_name = model_name.strip().strip("'").strip('"') if model_name else "gemma-4-12b-it-qat-q4_0"
         self.base_url = base_url.strip().strip("'").strip('"').rstrip("/") if base_url else "http://localhost:11434"
         self.provider = provider.strip().strip("'").strip('"').lower() if provider else "auto"
+        self.timeout = timeout
         
         # Clean api_key (handles empty quotes '""' in .env)
         self.api_key = None
@@ -118,7 +186,10 @@ class AIResearcher:
                 self.api_key = clean_key
                 
         if self.api_key and self.provider != "ollama":
-            self.client = genai.Client(api_key=self.api_key)
+            self.client = genai.Client(
+                api_key=self.api_key,
+                http_options={"timeout": self.timeout * 1000},
+            )
         else:
             self.client = None
 
@@ -141,19 +212,29 @@ class AIResearcher:
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
         parsed = json.loads(text)
+        core_business_audit = parsed.get("core_business_audit", [])
+        management_integrity = parsed.get("management_integrity", [])
+        if not isinstance(core_business_audit, list) or not isinstance(
+            management_integrity, list
+        ):
+            raise ValueError("AI audit fields must be arrays")
+
+        raw_impact = parsed.get("valuation_impact", {})
+        if not isinstance(raw_impact, dict):
+            raise ValueError("AI valuation impact must be an object")
+
+        def validated_offset(name: str) -> float:
+            value = float(raw_impact.get(name, 0.0))
+            lower_bound, upper_bound = VALUATION_OFFSET_BOUNDS[name]
+            if not math.isfinite(value) or not lower_bound <= value <= upper_bound:
+                raise ValueError(f"AI valuation offset {name} is outside safe bounds")
+            return value
+
         return {
-            "core_business_audit": parsed.get("core_business_audit", []),
-            "management_integrity": parsed.get("management_integrity", []),
+            "core_business_audit": core_business_audit[:10],
+            "management_integrity": management_integrity[:20],
             "valuation_impact": {
-                "stage_1_growth_offset": float(
-                    parsed.get("valuation_impact", {}).get("stage_1_growth_offset", 0.0)
-                ),
-                "stage_2_growth_offset": float(
-                    parsed.get("valuation_impact", {}).get("stage_2_growth_offset", 0.0)
-                ),
-                "discount_rate_offset": float(
-                    parsed.get("valuation_impact", {}).get("discount_rate_offset", 0.0)
-                ),
+                name: validated_offset(name) for name in VALUATION_OFFSET_BOUNDS
             },
         }
 
@@ -203,7 +284,7 @@ class AIResearcher:
         
         # 1. Use Google Gemini Cloud if API key is provided
         if self.client:
-            print("AI Auditing Layer: Using Google Gemini (Cloud)...")
+            logger.info("AI auditing layer is using Google Gemini")
             models_to_try = [
                 "gemini-3.5-flash",
                 "gemini-2.5-flash",
@@ -215,20 +296,21 @@ class AIResearcher:
             ]
             for model in models_to_try:
                 try:
-                    print(f"  Attempting with model: {model}")
+                    logger.info("Attempting Gemini model %s", model)
                     response = self.client.models.generate_content(
                         model=model,
                         contents=prompt,
                     )
                     return self.parse_structured_response(response.text)
-                except Exception as e:
-                    print(f"  Model {model} failed: {e}")
+                except Exception:
+                    logger.warning("Gemini model %s failed", model, exc_info=True)
             
-            print("  All Gemini Cloud models exhausted or failed.")
-            return self.empty_response()
+            raise AIProviderError("All configured Gemini models failed")
+
+        if self.provider == "gemini":
+            raise AIProviderError("GOOGLE_API_KEY is required for Gemini")
         
-        # 2. Otherwise fallback to local Ollama
-        print(f"AI Auditing Layer: Using local Ollama ({self.model_name})...")
+        logger.info("AI auditing layer is using local Ollama model %s", self.model_name)
         try:
             payload = {
                 "model": self.model_name,
@@ -237,13 +319,15 @@ class AIResearcher:
                 "format": "json"
             }
             url = f"{self.base_url}/api/generate"
-            response = requests.post(url, json=payload, timeout=90)
+            response = requests.post(url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             response_json = response.json()
             response_text = response_json.get("response", "")
             return self.parse_structured_response(response_text)
-        except Exception as e:
-            print(f"Ollama local AI Analysis Error: {e}")
+        except Exception as exc:
+            logger.warning("Local Ollama analysis failed", exc_info=True)
+            if self.provider == "ollama":
+                raise AIProviderError("Ollama analysis failed") from exc
             return self.empty_response()
 
 if __name__ == "__main__":
