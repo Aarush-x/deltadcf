@@ -3,14 +3,65 @@ import { useQuery } from "@tanstack/react-query";
 import LandingPage from "./components/LandingPage";
 import AnalysisPage from "./components/AnalysisPage";
 
-async function fetchAnalysis(ticker) {
-  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
-  const res = await fetch(`${apiBase}/api/analyze/${ticker}`);
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "Analysis failed");
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+
+if (import.meta.env.PROD && !configuredApiUrl) {
+  throw new Error("VITE_API_URL is required for production builds");
+}
+
+const developmentApiUrl = import.meta.env.DEV ? "http://localhost:8000" : "";
+const API_BASE_URL = (configuredApiUrl || developmentApiUrl).replace(/\/+$/, "");
+const REQUEST_TIMEOUT_MS = 120_000;
+
+function errorMessageForStatus(status) {
+  if (status === 404 || status === 422) {
+    return "That ticker could not be analyzed. Check the symbol and exchange suffix.";
   }
-  return res.json();
+  if (status === 429) {
+    return "The service is receiving too many requests. Wait a moment and try again.";
+  }
+  if (status === 503) {
+    return "A financial-data or AI provider is temporarily unavailable. Try again later.";
+  }
+  if (status >= 500) {
+    return "The analysis service encountered an error. Try again later.";
+  }
+  return "The analysis request could not be completed.";
+}
+
+async function fetchAnalysis(ticker, querySignal) {
+  const timeoutController = new AbortController();
+  const timeoutId = window.setTimeout(
+    () => timeoutController.abort("timeout"),
+    REQUEST_TIMEOUT_MS,
+  );
+  const cancelFromQuery = () => timeoutController.abort("cancelled");
+  querySignal?.addEventListener("abort", cancelFromQuery, { once: true });
+
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/analyze/${encodeURIComponent(ticker)}`,
+      { signal: timeoutController.signal },
+    );
+    if (!response.ok) {
+      throw new Error(errorMessageForStatus(response.status));
+    }
+    return await response.json();
+  } catch (error) {
+    if (timeoutController.signal.aborted) {
+      if (timeoutController.signal.reason === "timeout") {
+        throw new Error("The analysis timed out. Try again in a moment.");
+      }
+      throw new Error("The analysis request was cancelled.");
+    }
+    if (error instanceof TypeError) {
+      throw new Error("The analysis service is unreachable. Check your connection and try again.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+    querySignal?.removeEventListener("abort", cancelFromQuery);
+  }
 }
 
 export default function App() {
@@ -37,15 +88,16 @@ export default function App() {
     });
   };
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ["analysis", ticker],
-    queryFn: () => fetchAnalysis(ticker),
+    queryFn: ({ signal }) => fetchAnalysis(ticker, signal),
     enabled: !!ticker,
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
 
   const handleAnalyze = (value) => {
+    if (isFetching) return;
     const trimmed = value.trim().toUpperCase();
     if (!trimmed) return;
     setTicker(trimmed);
@@ -84,6 +136,7 @@ export default function App() {
       isLoading={isLoading}
       isError={isError}
       error={error}
+      isSubmitting={isFetching}
       isDark={isDark}
       onToggleTheme={toggleTheme}
     />

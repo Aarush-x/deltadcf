@@ -18,6 +18,7 @@ export default function AnalysisPage({
   isLoading,
   isError,
   error,
+  isSubmitting,
   isDark,
   onToggleTheme,
 }) {
@@ -32,6 +33,7 @@ export default function AnalysisPage({
         onTickerInputChange={onTickerInputChange}
         onSubmit={onSubmit}
         onLogoClick={onLogoClick}
+        isSubmitting={isSubmitting}
         isDark={isDark}
         onToggleTheme={onToggleTheme}
       />

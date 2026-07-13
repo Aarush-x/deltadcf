@@ -7,8 +7,8 @@ export default function ErrorState({ message }) {
         <AlertCircle className="w-8 h-8 text-critical mx-auto mb-4" />
         <p className="font-data-md text-data-md text-on-surface mb-3">{message}</p>
         <p className="font-body-md text-body-md text-text-dim">
-          Verify the ticker is valid (e.g. AAPL, ETERNAL.NS) and the backend is
-          running on port 8000.
+          Verify the ticker is valid (e.g. AAPL or ETERNAL.NS), then retry. If
+          the problem persists, the upstream market-data service may be unavailable.
         </p>
       </div>
     </div>
