@@ -1,6 +1,7 @@
 services:
   - type: web
     name: deltadcf-backend
+    plan: free
     runtime: docker
     dockerContext: .
     dockerfilePath: ./backend/Dockerfile
