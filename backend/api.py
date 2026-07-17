@@ -209,9 +209,14 @@ def analyze(ticker: TickerPath, response: Response):
         )
 
         mda_text = get_mda_text(ticker_symbol, processor)
+        financial_context = fetcher.get_ai_financial_context()
         ai_report = (
-            ai.analyze_checklist(mda_text, FULL_CHECKLIST_TEXT)
-            if mda_text
+            ai.analyze_checklist(
+                mda_text,
+                FULL_CHECKLIST_TEXT,
+                financial_context=financial_context,
+            )
+            if mda_text or financial_context.get("annual_periods")
             else AIResearcher.empty_response()
         )
 
