@@ -68,6 +68,20 @@ def _latest_report(payload: dict[str, Any]) -> dict[str, Any]:
     return reports[0] if reports else {}
 
 
+def _reports_by_date(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(report["fiscalDateEnding"]): report
+        for report in payload.get("annualReports") or []
+        if isinstance(report, dict) and report.get("fiscalDateEnding")
+    }
+
+
+def _change(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous in (None, 0):
+        return None
+    return (current - previous) / abs(previous)
+
+
 def _provider_symbol(ticker_symbol: str) -> str:
     """Translate common app symbols to Alpha Vantage's global symbol format."""
     ticker = ticker_symbol.strip().upper()
@@ -234,4 +248,94 @@ class FinancialDataFetcher:
             "inventory": _number(balance.get("inventory")),
             "receivables": _number(balance.get("currentNetReceivables")),
             "net_income": _number(income.get("netIncome")),
+        }
+
+    def get_ai_financial_context(self, years: int = 3) -> dict[str, Any]:
+        """Return compact, normalized annual facts for the AI checklist."""
+        bundle = self._get_bundle()
+        cash_by_date = _reports_by_date(bundle.cash_flow)
+        balance_by_date = _reports_by_date(bundle.balance_sheet)
+        income_by_date = _reports_by_date(bundle.income_statement)
+        fiscal_dates = sorted(
+            set(cash_by_date) | set(balance_by_date) | set(income_by_date),
+            reverse=True,
+        )[:years]
+
+        annual_periods: list[dict[str, Any]] = []
+        for fiscal_date in fiscal_dates:
+            cash_flow = cash_by_date.get(fiscal_date, {})
+            balance = balance_by_date.get(fiscal_date, {})
+            income = income_by_date.get(fiscal_date, {})
+            operating_cash_flow = _number(cash_flow.get("operatingCashflow"))
+            capital_expenditure = _number(cash_flow.get("capitalExpenditures"))
+            net_income = _number(income.get("netIncome"))
+            equity = _number(balance.get("stockholdersEquity"))
+            annual_periods.append(
+                {
+                    "fiscal_date": fiscal_date,
+                    "revenue": _number(income.get("totalRevenue")),
+                    "gross_profit": _number(income.get("grossProfit")),
+                    "net_income": net_income,
+                    "diluted_eps": _number(income.get("dilutedEPS")),
+                    "diluted_average_shares": _number(
+                        income.get("dilutedAverageShares")
+                    ),
+                    "total_assets": _number(balance.get("totalAssets")),
+                    "total_debt": _number(balance.get("shortLongTermDebtTotal")),
+                    "stockholders_equity": equity,
+                    "inventory": _number(balance.get("inventory")),
+                    "receivables": _number(balance.get("currentNetReceivables")),
+                    "operating_cash_flow": operating_cash_flow,
+                    "capital_expenditure": capital_expenditure,
+                    "free_cash_flow": (
+                        operating_cash_flow - abs(capital_expenditure)
+                        if operating_cash_flow is not None
+                        and capital_expenditure is not None
+                        else None
+                    ),
+                    "return_on_equity": (
+                        net_income / equity
+                        if net_income is not None and equity not in (None, 0)
+                        else None
+                    ),
+                }
+            )
+
+        trend_fields = (
+            "revenue",
+            "gross_profit",
+            "net_income",
+            "diluted_eps",
+            "diluted_average_shares",
+            "inventory",
+            "receivables",
+            "operating_cash_flow",
+        )
+        for index, period in enumerate(annual_periods):
+            previous = annual_periods[index + 1] if index + 1 < len(annual_periods) else {}
+            current_equity = period.get("stockholders_equity")
+            previous_equity = previous.get("stockholders_equity")
+            if (
+                period.get("net_income") is not None
+                and current_equity is not None
+                and previous_equity is not None
+                and current_equity + previous_equity != 0
+            ):
+                period["return_on_equity"] = period["net_income"] / (
+                    (current_equity + previous_equity) / 2
+                )
+            period["year_over_year_change"] = {
+                field: _change(period.get(field), previous.get(field))
+                for field in trend_fields
+            }
+
+        return {
+            "source": (
+                "SEC EDGAR Company Facts" if self.is_us_ticker else "Alpha Vantage"
+            ),
+            "currency": "USD" if self.is_us_ticker else "INR",
+            "current_shares_outstanding": _number(
+                bundle.overview.get("SharesOutstanding")
+            ),
+            "annual_periods": annual_periods,
         }

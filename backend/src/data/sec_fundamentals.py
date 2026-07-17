@@ -202,6 +202,18 @@ class SECFundamentalsFetcher:
             ("NetIncomeLoss", "ProfitLoss"),
             duration=True,
         )
+        diluted_eps = _concept_series(
+            us_gaap,
+            ("EarningsPerShareDiluted",),
+            unit="USD/shares",
+            duration=True,
+        )
+        diluted_shares = _concept_series(
+            us_gaap,
+            ("WeightedAverageNumberOfDilutedSharesOutstanding",),
+            unit="shares",
+            duration=True,
+        )
 
         assets = _concept_series(us_gaap, ("Assets",), duration=False)
         cash = _concept_series(
@@ -286,7 +298,9 @@ class SECFundamentalsFetcher:
             )
 
         income_reports = []
-        income_periods = set().union(revenue, gross_profit, net_income)
+        income_periods = set().union(
+            revenue, gross_profit, net_income, diluted_eps, diluted_shares
+        )
         for period_end in sorted(income_periods, reverse=True):
             income_reports.append(
                 {
@@ -294,6 +308,10 @@ class SECFundamentalsFetcher:
                     "totalRevenue": _value_on_or_before(revenue, period_end),
                     "grossProfit": _value_on_or_before(gross_profit, period_end),
                     "netIncome": _value_on_or_before(net_income, period_end),
+                    "dilutedEPS": _value_on_or_before(diluted_eps, period_end),
+                    "dilutedAverageShares": _value_on_or_before(
+                        diluted_shares, period_end
+                    ),
                 }
             )
 
