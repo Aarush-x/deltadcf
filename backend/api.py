@@ -3,11 +3,10 @@ import re
 from pathlib import Path
 from typing import Annotated
 
-import yfinance as yf
-from fastapi import FastAPI, HTTPException, Path as FastAPIPath
+from fastapi import FastAPI, HTTPException, Path as FastAPIPath, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from errors import AIProviderError, ExternalServiceError
+from errors import AIProviderError, DataProviderRateLimitError, ExternalServiceError
 from settings import settings
 from src.analysis.dcf import DCFEngine
 from src.analysis.research_checklist import ResearchChecklist
@@ -15,6 +14,7 @@ from src.data.bse_fetcher import BSEFetcher
 from src.data.fetcher import FinancialDataFetcher
 from src.data.nse_fetcher import NSEFetcher
 from src.data.report_processor import AIResearcher, ReportProcessor
+from src.utils.cache import TTLCache
 
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,12 @@ BASE_GROWTH_STAGE_2 = 0.10
 BASE_DISCOUNT_RATE = 0.09
 TERMINAL_RATE = 0.03
 TICKER_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=-]{0,19}$")
+ANALYSIS_CACHE_TTL_SECONDS = 15 * 60
+ANALYSIS_CACHE_MAX_ENTRIES = 128
+_analysis_cache: TTLCache[str, dict] = TTLCache(
+    ttl_seconds=ANALYSIS_CACHE_TTL_SECONDS,
+    max_entries=ANALYSIS_CACHE_MAX_ENTRIES,
+)
 
 FULL_CHECKLIST_TEXT = """
 1. Gross Profit Margin > 20%: Higher the margin, higher is the evidence of a sustainable moat
@@ -85,36 +91,8 @@ def normalize_ticker(value: str) -> str:
 
 
 def resolve_ticker(query: str) -> str:
-    """Resolve a ticker or company query while preferring Indian and major US exchanges."""
-    query = normalize_ticker(query)
-
-    if "." in query or (len(query) <= 5 and query.isalpha()):
-        try:
-            if yf.Ticker(query).info.get("symbol"):
-                return query
-        except Exception:
-            logger.info("Direct ticker lookup failed", extra={"ticker": query})
-
-    try:
-        quotes = yf.Search(query, max_results=8).quotes
-    except Exception as exc:
-        logger.warning("Ticker search provider failed", exc_info=exc)
-        raise ExternalServiceError("Ticker lookup provider failed") from exc
-
-    if not quotes:
-        return query
-
-    for suffix in (".NS", ".BO"):
-        for quote in quotes:
-            symbol = quote.get("symbol", "")
-            if symbol.endswith(suffix):
-                return symbol
-
-    for quote in quotes:
-        if quote.get("exchange", "") in {"NMS", "NYQ", "ASE"}:
-            return quote.get("symbol", query)
-
-    return quotes[0].get("symbol", query)
+    """Validate a ticker without spending a provider request on symbol search."""
+    return normalize_ticker(query)
 
 
 def _local_report(ticker_symbol: str, reports_dir: Path) -> Path | None:
@@ -138,7 +116,7 @@ def get_mda_text(ticker_symbol: str, processor: ReportProcessor) -> str:
         raw_text = processor.extract_text_from_pdf(local_report)
         return processor.get_key_sections(raw_text).get("mda", "")
 
-    is_indian_stock = ticker_symbol.endswith((".NS", ".BO"))
+    is_indian_stock = ticker_symbol.endswith((".NS", ".BO", ".BSE"))
     if not is_indian_stock:
         return processor.get_sec_mda() or ""
 
@@ -180,11 +158,21 @@ TickerPath = Annotated[
 
 
 @app.get("/api/analyze/{ticker}")
-def analyze(ticker: TickerPath):
+def analyze(ticker: TickerPath, response: Response):
     """Run the existing DCF pipeline in FastAPI's worker thread pool."""
     try:
         ticker_symbol = resolve_ticker(ticker)
-        fetcher = FinancialDataFetcher(ticker_symbol)
+        cached_analysis = _analysis_cache.get(ticker_symbol)
+        if cached_analysis is not None:
+            response.headers["X-DeltaDCF-Cache"] = "HIT"
+            return cached_analysis
+
+        response.headers["X-DeltaDCF-Cache"] = "MISS"
+        fetcher = FinancialDataFetcher(
+            ticker_symbol,
+            api_key=settings.alpha_vantage_api_key,
+            timeout=settings.external_request_timeout_seconds,
+        )
         fcf_history = fetcher.get_free_cash_flow()
         shares = fetcher.get_shares_outstanding()
         net_debt = fetcher.get_net_debt()
@@ -246,8 +234,8 @@ def analyze(ticker: TickerPath):
             intrinsic_value, net_debt, shares
         )
 
-        currency = "INR" if ticker_symbol.endswith((".NS", ".BO")) else "USD"
-        return {
+        currency = "INR" if ticker_symbol.endswith((".NS", ".BO", ".BSE")) else "USD"
+        result = {
             "ticker": ticker_symbol,
             "currency": currency,
             "quantitative_checklist": quantitative_checklist,
@@ -274,6 +262,8 @@ def analyze(ticker: TickerPath):
             },
             "valuation": {"intrinsic_price_per_share": price_per_share},
         }
+        _analysis_cache.set(ticker_symbol, result)
+        return result
     except HTTPException:
         raise
     except AIProviderError as exc:
@@ -281,6 +271,13 @@ def analyze(ticker: TickerPath):
         raise HTTPException(
             status_code=503,
             detail="The AI analysis provider is temporarily unavailable. Try again later.",
+        ) from exc
+    except DataProviderRateLimitError as exc:
+        logger.warning("Financial data quota exceeded for %s", ticker, exc_info=exc)
+        raise HTTPException(
+            status_code=429,
+            detail="The daily financial-data allowance has been reached. Try again later.",
+            headers={"Retry-After": "3600"},
         ) from exc
     except ExternalServiceError as exc:
         logger.warning("External data provider failed for %s", ticker, exc_info=exc)

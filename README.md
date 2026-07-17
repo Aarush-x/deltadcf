@@ -1,6 +1,6 @@
 # DeltaDCF
 
-DeltaDCF is an equity-research application that combines a quantitative discounted cash flow model with optional AI-assisted annual-report auditing. It supports US securities through yfinance and SEC filings, plus Indian securities through NSE/BSE report sources.
+DeltaDCF is an equity-research application that combines a quantitative discounted cash flow model with optional AI-assisted annual-report auditing. It uses Alpha Vantage for structured fundamentals, SEC filings for US report analysis, and NSE/BSE report sources for Indian securities.
 
 The DCF formulas and baseline assumptions remain in `backend/src/analysis/dcf.py` and `backend/api.py`. The production configuration in this repository changes deployment, validation, failure handling, and operational safety; it does not redesign the valuation model.
 
@@ -9,12 +9,14 @@ The DCF formulas and baseline assumptions remain in `backend/src/analysis/dcf.py
 | Component | Directory | Production runtime | Responsibility |
 | --- | --- | --- | --- |
 | Web UI | `frontend/` | Vercel | Vite + React interface; calls the configured API |
-| API | `backend/` | Render Docker web service | FastAPI orchestration, report processing, AI audit, and DCF response |
+| API | `backend/` | Render Docker web service | FastAPI orchestration, cached Alpha Vantage fundamentals, report processing, AI audit, and DCF response |
 | CI | `.github/workflows/ci.yml` | GitHub Actions | Backend tests, frontend build, and Docker build |
 
-The API entry point is `backend/api.py` (`api:app`). `GET /api/analyze/{ticker}` resolves the symbol, fetches financial statements through yfinance, runs the quantitative checklist, obtains report text from SEC/NSE/BSE or an optional local PDF, calls the selected AI provider when report text exists, and applies the resulting offsets to the existing DCF calculation. `GET /health` is a dependency-free liveness endpoint.
+The API entry point is `backend/api.py` (`api:app`). `GET /api/analyze/{ticker}` validates the symbol, fetches financial statements through Alpha Vantage, runs the quantitative checklist, obtains report text from SEC/NSE/BSE or an optional local PDF, calls the selected AI provider when report text exists, and applies the resulting offsets to the existing DCF calculation. `GET /health` is a dependency-free liveness endpoint.
 
-External services are failure domains. yfinance, SEC/edgartools, NSE, BSE, Google Gemini, local Ollama, and third-party PDF responses can be slow, rate-limited, unavailable, or change behavior without notice. Downloaded reports are size-limited, stored in the operating system's temporary directory, and deleted after processing. A local `reports/` directory is optional and is not required on Render.
+External services are failure domains. Alpha Vantage, SEC/edgartools, NSE, BSE, Google Gemini, local Ollama, and third-party PDF responses can be slow, rate-limited, unavailable, or change behavior without notice. Downloaded reports are size-limited, stored in the operating system's temporary directory, and deleted after processing. A local `reports/` directory is optional and is not required on Render.
+
+Successful complete analyses are cached in memory for 15 minutes. The underlying Alpha Vantage fundamentals bundle is cached for 24 hours, so an expired analysis can be recomputed without consuming another four provider calls. Provider calls are paced below two requests per second to avoid burst throttling. Both caches are bounded and process-local; they reset when the free Render instance restarts or sleeps.
 
 ## Local setup
 
@@ -37,7 +39,7 @@ The backend listens on `http://localhost:8000`. Verify it with:
 curl --fail http://localhost:8000/health
 ```
 
-For local AI analysis, either set `GOOGLE_API_KEY` and `AI_PROVIDER=gemini`, or run Ollama and use `AI_PROVIDER=ollama`. `AI_PROVIDER=auto` is a development-only convenience: it uses Gemini when a key exists and otherwise attempts local Ollama.
+Set `ALPHA_VANTAGE_API_KEY` for all financial analyses. For local AI analysis, either set `GOOGLE_API_KEY` and `AI_PROVIDER=gemini`, or run Ollama and use `AI_PROVIDER=ollama`. `AI_PROVIDER=auto` is a development-only convenience: it uses Gemini when a key exists and otherwise attempts local Ollama.
 
 ### Frontend
 
@@ -62,6 +64,7 @@ The local frontend defaults to `http://localhost:8000` only in Vite development 
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `PORT` | Set automatically by Render | Uvicorn listen port; defaults to `8000` locally |
 | `GOOGLE_API_KEY` | Required when AI report analysis is expected | Server-side Gemini credential; never expose through Vite |
+| `ALPHA_VANTAGE_API_KEY` | Required | Server-side fundamentals credential; free keys currently have a small daily request allowance |
 | `AI_PROVIDER` | `gemini` | Production permits the cloud provider only |
 | `CORS_ALLOWED_ORIGINS` | Required | Comma-separated exact frontend origins, with no wildcard |
 | `OLLAMA_MODEL` | Local only | Optional local Ollama model name |
@@ -101,6 +104,7 @@ docker run --rm -p 8000:8000 \
   -e AI_PROVIDER=gemini \
   -e CORS_ALLOWED_ORIGINS=http://localhost:4173 \
   -e GOOGLE_API_KEY=your_key_here \
+  -e ALPHA_VANTAGE_API_KEY=your_key_here \
   -e SEC_IDENTITY="DeltaDCF you@example.com" \
   deltadcf-backend
 ```
@@ -122,6 +126,7 @@ The root `render.yaml` defines a Docker web service with the root Docker context
 3. Select the repository and allow Render to read the root `render.yaml`.
 4. Supply the prompted variables:
    - `GOOGLE_API_KEY`: a valid server-side Gemini key.
+   - `ALPHA_VANTAGE_API_KEY`: a free Alpha Vantage API key used for financial statements.
    - `CORS_ALLOWED_ORIGINS`: the exact Vercel production origin, for example `https://deltadcf.vercel.app`. Add preview origins as comma-separated values only when they are intentionally trusted.
    - `SEC_IDENTITY`: the application name and a monitored contact email.
 5. Create the Blueprint and wait for the Docker build and `/health` check to pass.
@@ -172,7 +177,8 @@ That command is expected to fail with `VITE_API_URL is required for production b
 
 ## Troubleshooting
 
-- **Browser reports a provider failure:** Check Render logs for the server-side exception category. Confirm Gemini quota/key status and upstream market-data availability. User responses intentionally omit raw provider messages.
+- **Browser reports a provider failure:** Check Render logs for the server-side exception category. Confirm Alpha Vantage and Gemini key status. User responses intentionally omit raw provider messages.
+- **Browser reports the daily financial-data allowance was reached:** Wait for the Alpha Vantage free allowance to reset. Cached tickers continue working while the Render process remains alive.
 - **CORS error:** Set `CORS_ALLOWED_ORIGINS` to the exact Vercel origin, including `https://` and excluding a trailing slash, then redeploy Render.
 - **Frontend build fails immediately:** Set `VITE_API_URL` for the Vercel environment or the local production-build command.
 - **Render health check fails:** Confirm the container is using Render's injected `PORT` and that the Docker command has not been overridden.
@@ -181,10 +187,11 @@ That command is expected to fail with `VITE_API_URL is required for production b
 
 ## Known limitations
 
-- Analysis is synchronous and request-scoped. FastAPI runs it in a worker thread so it does not block the event loop, but there is no queue, shared result cache, or durable job state.
+- Analysis is synchronous. FastAPI runs it in a worker thread so it does not block the event loop. The bounded caches are per-process and non-durable; there is no queue or shared cache across service instances.
 - Total analysis latency depends on several third-party providers and can exceed a frontend request timeout during outages or cold starts.
 - Render's filesystem is treated as ephemeral; user-managed report persistence is intentionally not part of this deployment.
 - NSE/BSE scraping and report URL formats can change without notice.
+- Alpha Vantage's documented global examples use BSE symbols. For prototype compatibility, `.NS` and `.BO` inputs are translated to `.BSE` for structured fundamentals; availability varies by company.
 - AI output is probabilistic. If no report text can be obtained, the DCF still runs with zero qualitative offsets, matching the existing fallback behavior.
 - The fixed DCF assumptions are product choices, not individualized forecasts.
 

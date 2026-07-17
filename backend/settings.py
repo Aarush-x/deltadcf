@@ -39,6 +39,7 @@ class Settings:
     log_level: str
     port: int
     google_api_key: str | None
+    alpha_vantage_api_key: str | None
     ai_provider: str
     cors_allowed_origins: tuple[str, ...]
     ollama_model: str
@@ -57,6 +58,7 @@ class Settings:
         app_env = _clean(os.getenv("APP_ENV") or "development").lower()
         log_level = _clean(os.getenv("LOG_LEVEL") or "INFO").upper()
         api_key = _clean(os.getenv("GOOGLE_API_KEY")) or None
+        alpha_vantage_api_key = _clean(os.getenv("ALPHA_VANTAGE_API_KEY")) or None
         provider_default = "gemini" if app_env == "production" else "auto"
         ai_provider = _clean(os.getenv("AI_PROVIDER") or provider_default).lower()
 
@@ -86,6 +88,7 @@ class Settings:
             log_level=log_level,
             port=_positive_int("PORT", 8000),
             google_api_key=api_key,
+            alpha_vantage_api_key=alpha_vantage_api_key,
             ai_provider=ai_provider,
             cors_allowed_origins=origins,
             ollama_model=_clean(os.getenv("OLLAMA_MODEL") or "gemma-4-12b-it-qat-q4_0"),
