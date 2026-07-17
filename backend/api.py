@@ -172,6 +172,7 @@ def analyze(ticker: TickerPath, response: Response):
             ticker_symbol,
             api_key=settings.alpha_vantage_api_key,
             timeout=settings.external_request_timeout_seconds,
+            sec_identity=settings.sec_identity,
         )
         fcf_history = fetcher.get_free_cash_flow()
         shares = fetcher.get_shares_outstanding()

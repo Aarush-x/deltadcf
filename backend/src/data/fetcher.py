@@ -9,6 +9,7 @@ from typing import Any
 import requests
 
 from errors import DataProviderRateLimitError, ExternalServiceError
+from src.data.sec_fundamentals import SECFundamentalsFetcher, clear_sec_cache
 from src.utils.cache import TTLCache
 
 
@@ -19,6 +20,7 @@ FUNDAMENTALS_CACHE_TTL_SECONDS = 24 * 60 * 60
 FUNDAMENTALS_CACHE_MAX_ENTRIES = 256
 MIN_REQUEST_INTERVAL_SECONDS = 0.6
 _request_pacing_lock = threading.Lock()
+_bundle_fetch_lock = threading.Lock()
 _last_request_started_at = 0.0
 
 
@@ -38,6 +40,7 @@ _fundamentals_cache: TTLCache[str, FundamentalsBundle] = TTLCache(
 
 def clear_fundamentals_cache() -> None:
     _fundamentals_cache.clear()
+    clear_sec_cache()
 
 
 def _wait_for_request_slot() -> None:
@@ -80,13 +83,24 @@ def _provider_symbol(ticker_symbol: str) -> str:
 
 
 class FinancialDataFetcher:
-    """Fetch and normalize DCF fundamentals from Alpha Vantage."""
+    """Fetch normalized DCF fundamentals from SEC EDGAR or Alpha Vantage."""
 
-    def __init__(self, ticker_symbol: str, api_key: str | None, timeout: int = 30):
+    def __init__(
+        self,
+        ticker_symbol: str,
+        api_key: str | None,
+        timeout: int = 30,
+        sec_identity: str = "DeltaDCF support@example.com",
+    ):
         self.ticker_symbol = ticker_symbol.strip().upper()
         self.provider_symbol = _provider_symbol(self.ticker_symbol)
         self.api_key = (api_key or "").strip()
         self.timeout = timeout
+        self.sec_identity = sec_identity
+
+    @property
+    def is_us_ticker(self) -> bool:
+        return not self.ticker_symbol.endswith((".NS", ".BO", ".BSE"))
 
     def _request(self, function: str) -> dict[str, Any]:
         if not self.api_key:
@@ -124,13 +138,7 @@ class FinancialDataFetcher:
             raise ExternalServiceError("Alpha Vantage did not recognize the ticker")
         return payload
 
-    def _get_bundle(self) -> FundamentalsBundle:
-        cached = _fundamentals_cache.get(self.provider_symbol)
-        if cached is not None:
-            logger.info("Fundamentals cache hit", extra={"ticker": self.ticker_symbol})
-            return cached
-
-        logger.info("Fundamentals cache miss", extra={"ticker": self.ticker_symbol})
+    def _fetch_alpha_vantage_bundle(self) -> FundamentalsBundle:
         bundle = FundamentalsBundle(
             cash_flow=self._request("CASH_FLOW"),
             balance_sheet=self._request("BALANCE_SHEET"),
@@ -146,8 +154,40 @@ class FinancialDataFetcher:
             )
         ):
             raise ExternalServiceError("Alpha Vantage returned no fundamentals")
-        _fundamentals_cache.set(self.provider_symbol, bundle)
         return bundle
+
+    def _fetch_bundle(self) -> FundamentalsBundle:
+        if self.is_us_ticker:
+            try:
+                normalized = SECFundamentalsFetcher(
+                    self.ticker_symbol,
+                    identity=self.sec_identity,
+                    timeout=self.timeout,
+                ).fetch_normalized()
+                return FundamentalsBundle(**normalized)
+            except ExternalServiceError as exc:
+                logger.warning(
+                    "SEC fundamentals unavailable; falling back to Alpha Vantage",
+                    extra={"ticker": self.ticker_symbol, "reason": str(exc)},
+                )
+        return self._fetch_alpha_vantage_bundle()
+
+    def _get_bundle(self) -> FundamentalsBundle:
+        cache_key = f"SEC:{self.ticker_symbol}" if self.is_us_ticker else f"ALPHA:{self.provider_symbol}"
+        cached = _fundamentals_cache.get(cache_key)
+        if cached is not None:
+            logger.info("Fundamentals cache hit", extra={"ticker": self.ticker_symbol})
+            return cached
+
+        with _bundle_fetch_lock:
+            cached = _fundamentals_cache.get(cache_key)
+            if cached is not None:
+                logger.info("Fundamentals cache hit", extra={"ticker": self.ticker_symbol})
+                return cached
+            logger.info("Fundamentals cache miss", extra={"ticker": self.ticker_symbol})
+            bundle = self._fetch_bundle()
+            _fundamentals_cache.set(cache_key, bundle)
+            return bundle
 
     def get_free_cash_flow(self, years: int = 3) -> dict[str, float] | None:
         reports = self._get_bundle().cash_flow.get("annualReports") or []
