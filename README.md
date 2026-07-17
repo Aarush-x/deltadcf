@@ -1,6 +1,6 @@
 # DeltaDCF
 
-DeltaDCF is an equity-research application that combines a quantitative discounted cash flow model with optional AI-assisted annual-report auditing. It uses Alpha Vantage for structured fundamentals, SEC filings for US report analysis, and NSE/BSE report sources for Indian securities.
+DeltaDCF is an equity-research application that combines a quantitative discounted cash flow model with optional AI-assisted annual-report auditing. It uses the free SEC EDGAR Company Facts API for US fundamentals, Alpha Vantage as a fallback and for non-US fundamentals, SEC filings for US report analysis, and NSE/BSE report sources for Indian securities.
 
 The DCF formulas and baseline assumptions remain in `backend/src/analysis/dcf.py` and `backend/api.py`. The production configuration in this repository changes deployment, validation, failure handling, and operational safety; it does not redesign the valuation model.
 
@@ -9,14 +9,14 @@ The DCF formulas and baseline assumptions remain in `backend/src/analysis/dcf.py
 | Component | Directory | Production runtime | Responsibility |
 | --- | --- | --- | --- |
 | Web UI | `frontend/` | Vercel | Vite + React interface; calls the configured API |
-| API | `backend/` | Render Docker web service | FastAPI orchestration, cached Alpha Vantage fundamentals, report processing, AI audit, and DCF response |
+| API | `backend/` | Render Docker web service | FastAPI orchestration, cached SEC/Alpha Vantage fundamentals, report processing, AI audit, and DCF response |
 | CI | `.github/workflows/ci.yml` | GitHub Actions | Backend tests, frontend build, and Docker build |
 
-The API entry point is `backend/api.py` (`api:app`). `GET /api/analyze/{ticker}` validates the symbol, fetches financial statements through Alpha Vantage, runs the quantitative checklist, obtains report text from SEC/NSE/BSE or an optional local PDF, calls the selected AI provider when report text exists, and applies the resulting offsets to the existing DCF calculation. `GET /health` is a dependency-free liveness endpoint.
+The API entry point is `backend/api.py` (`api:app`). `GET /api/analyze/{ticker}` validates the symbol, fetches US financial statements from SEC EDGAR with Alpha Vantage fallback, runs the quantitative checklist, obtains report text from SEC/NSE/BSE or an optional local PDF, calls the selected AI provider when report text exists, and applies the resulting offsets to the existing DCF calculation. `GET /health` is a dependency-free liveness endpoint.
 
 External services are failure domains. Alpha Vantage, SEC/edgartools, NSE, BSE, Google Gemini, local Ollama, and third-party PDF responses can be slow, rate-limited, unavailable, or change behavior without notice. Downloaded reports are size-limited, stored in the operating system's temporary directory, and deleted after processing. A local `reports/` directory is optional and is not required on Render.
 
-Successful complete analyses are cached in memory for 15 minutes. The underlying Alpha Vantage fundamentals bundle is cached for 24 hours, so an expired analysis can be recomputed without consuming another four provider calls. Provider calls are paced below two requests per second to avoid burst throttling. Both caches are bounded and process-local; they reset when the free Render instance restarts or sleeps.
+Successful complete analyses are cached in memory for 15 minutes. The underlying fundamentals bundle and SEC ticker-to-CIK mapping are cached for 24 hours. US ticker analyses normally require one SEC Company Facts request after the ticker mapping is cached; Alpha Vantage calls are paced below two requests per second when fallback is required. All caches are bounded and process-local, so they reset when the free Render instance restarts or sleeps.
 
 ## Local setup
 
@@ -39,7 +39,7 @@ The backend listens on `http://localhost:8000`. Verify it with:
 curl --fail http://localhost:8000/health
 ```
 
-Set `ALPHA_VANTAGE_API_KEY` for all financial analyses. For local AI analysis, either set `GOOGLE_API_KEY` and `AI_PROVIDER=gemini`, or run Ollama and use `AI_PROVIDER=ollama`. `AI_PROVIDER=auto` is a development-only convenience: it uses Gemini when a key exists and otherwise attempts local Ollama.
+Set an honest `SEC_IDENTITY` containing a monitored email address for US financial analyses. `ALPHA_VANTAGE_API_KEY` is the fallback credential and remains necessary for non-US fundamentals. For local AI analysis, either set `GOOGLE_API_KEY` and `AI_PROVIDER=gemini`, or run Ollama and use `AI_PROVIDER=ollama`. `AI_PROVIDER=auto` is a development-only convenience: it uses Gemini when a key exists and otherwise attempts local Ollama.
 
 ### Frontend
 
@@ -64,12 +64,12 @@ The local frontend defaults to `http://localhost:8000` only in Vite development 
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `PORT` | Set automatically by Render | Uvicorn listen port; defaults to `8000` locally |
 | `GOOGLE_API_KEY` | Required when AI report analysis is expected | Server-side Gemini credential; never expose through Vite |
-| `ALPHA_VANTAGE_API_KEY` | Required | Server-side fundamentals credential; free keys currently have a small daily request allowance |
+| `ALPHA_VANTAGE_API_KEY` | Required for non-US/fallback | Server-side fallback fundamentals credential; free keys currently have a small daily request allowance |
 | `AI_PROVIDER` | `gemini` | Production permits the cloud provider only |
 | `CORS_ALLOWED_ORIGINS` | Required | Comma-separated exact frontend origins, with no wildcard |
 | `OLLAMA_MODEL` | Local only | Optional local Ollama model name |
 | `OLLAMA_BASE_URL` | Local only | Optional local Ollama URL |
-| `SEC_IDENTITY` | Recommended | Honest edgartools identity, such as `DeltaDCF you@example.com` |
+| `SEC_IDENTITY` | Required for US data | Honest SEC client identity with a monitored email, such as `DeltaDCF you@example.com` |
 | `REPORTS_DIR` | Optional | Local PDF fallback directory; defaults to `reports` |
 | `EXTERNAL_REQUEST_TIMEOUT_SECONDS` | Optional | External HTTP timeout; defaults to `60` |
 | `MAX_REPORT_BYTES` | Optional | Maximum downloaded PDF size; defaults to 25 MiB |
@@ -126,7 +126,7 @@ The root `render.yaml` defines a Docker web service with the root Docker context
 3. Select the repository and allow Render to read the root `render.yaml`.
 4. Supply the prompted variables:
    - `GOOGLE_API_KEY`: a valid server-side Gemini key.
-   - `ALPHA_VANTAGE_API_KEY`: a free Alpha Vantage API key used for financial statements.
+   - `ALPHA_VANTAGE_API_KEY`: a free Alpha Vantage API key used for non-US statements and US fallback.
    - `CORS_ALLOWED_ORIGINS`: the exact Vercel production origin, for example `https://deltadcf.vercel.app`. Add preview origins as comma-separated values only when they are intentionally trusted.
    - `SEC_IDENTITY`: the application name and a monitored contact email.
 5. Create the Blueprint and wait for the Docker build and `/health` check to pass.
@@ -178,7 +178,7 @@ That command is expected to fail with `VITE_API_URL is required for production b
 ## Troubleshooting
 
 - **Browser reports a provider failure:** Check Render logs for the server-side exception category. Confirm Alpha Vantage and Gemini key status. User responses intentionally omit raw provider messages.
-- **Browser reports the daily financial-data allowance was reached:** Wait for the Alpha Vantage free allowance to reset. Cached tickers continue working while the Render process remains alive.
+- **Browser reports the daily financial-data allowance was reached for a US ticker:** Check `SEC_IDENTITY` and the preceding Render log entry; this means SEC data was unavailable or insufficient and the Alpha Vantage fallback also exhausted its allowance. Cached tickers continue working while the Render process remains alive.
 - **CORS error:** Set `CORS_ALLOWED_ORIGINS` to the exact Vercel origin, including `https://` and excluding a trailing slash, then redeploy Render.
 - **Frontend build fails immediately:** Set `VITE_API_URL` for the Vercel environment or the local production-build command.
 - **Render health check fails:** Confirm the container is using Render's injected `PORT` and that the Docker command has not been overridden.
