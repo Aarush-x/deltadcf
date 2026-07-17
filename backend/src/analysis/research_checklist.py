@@ -11,7 +11,7 @@ class ResearchChecklist:
         self.results = {}
 
     def run_quantitative_checks(self):
-        """Checks based on structured data (yfinance/edgartools)."""
+        """Checks based on normalized provider fundamentals."""
         
         # 1. Gross Profit Margin > 20%
         gp = self.data.get('gross_profit')
@@ -25,14 +25,15 @@ class ResearchChecklist:
             }
 
         # 4. Debt Level (Leverage)
-        total_debt = self.data.get('total_debt', 0)
-        total_assets = self.data.get('total_assets', 1)
-        debt_to_assets = total_debt / total_assets
-        self.results['Debt Level'] = {
-            'passed': debt_to_assets < 0.5, # Rule of thumb
-            'value': f"D/A: {debt_to_assets:.2f}",
-            'insight': "Low leverage is safer." if debt_to_assets < 0.5 else "High leverage increases financial risk."
-        }
+        total_debt = self.data.get('total_debt') or 0
+        total_assets = self.data.get('total_assets') or 0
+        if total_assets > 0:
+            debt_to_assets = total_debt / total_assets
+            self.results['Debt Level'] = {
+                'passed': debt_to_assets < 0.5, # Rule of thumb
+                'value': f"D/A: {debt_to_assets:.2f}",
+                'insight': "Low leverage is safer." if debt_to_assets < 0.5 else "High leverage increases financial risk."
+            }
 
         # 7. Positive Cash Flow from Operations
         cfo = self.data.get('operating_cash_flow', 0)

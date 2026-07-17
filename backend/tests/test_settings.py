@@ -35,3 +35,11 @@ def test_cors_origins_are_normalized(monkeypatch):
         "https://one.vercel.app",
         "https://two.example.com",
     )
+
+
+def test_alpha_vantage_key_is_trimmed(monkeypatch):
+    monkeypatch.setenv("ALPHA_VANTAGE_API_KEY", "  test-key  ")
+
+    loaded = Settings.from_env()
+
+    assert loaded.alpha_vantage_api_key == "test-key"

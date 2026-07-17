@@ -4,3 +4,7 @@ class ExternalServiceError(RuntimeError):
 
 class AIProviderError(ExternalServiceError):
     """The configured AI provider is unavailable or misconfigured."""
+
+
+class DataProviderRateLimitError(ExternalServiceError):
+    """A financial-data provider rejected requests due to quota."""

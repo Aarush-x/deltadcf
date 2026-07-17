@@ -1,114 +1,197 @@
-import yfinance as yf
-import pandas as pd
-from typing import Dict, Optional, Any
-import logging
+from __future__ import annotations
 
-from errors import ExternalServiceError
+import logging
+import threading
+import time
+from dataclasses import dataclass
+from typing import Any
+
+import requests
+
+from errors import DataProviderRateLimitError, ExternalServiceError
+from src.utils.cache import TTLCache
 
 
 logger = logging.getLogger(__name__)
 
+ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
+FUNDAMENTALS_CACHE_TTL_SECONDS = 24 * 60 * 60
+FUNDAMENTALS_CACHE_MAX_ENTRIES = 256
+MIN_REQUEST_INTERVAL_SECONDS = 0.6
+_request_pacing_lock = threading.Lock()
+_last_request_started_at = 0.0
+
+
+@dataclass(frozen=True)
+class FundamentalsBundle:
+    cash_flow: dict[str, Any]
+    balance_sheet: dict[str, Any]
+    income_statement: dict[str, Any]
+    overview: dict[str, Any]
+
+
+_fundamentals_cache: TTLCache[str, FundamentalsBundle] = TTLCache(
+    ttl_seconds=FUNDAMENTALS_CACHE_TTL_SECONDS,
+    max_entries=FUNDAMENTALS_CACHE_MAX_ENTRIES,
+)
+
+
+def clear_fundamentals_cache() -> None:
+    _fundamentals_cache.clear()
+
+
+def _wait_for_request_slot() -> None:
+    """Keep provider calls below the documented demo burst threshold."""
+    global _last_request_started_at
+    with _request_pacing_lock:
+        elapsed = time.monotonic() - _last_request_started_at
+        remaining = MIN_REQUEST_INTERVAL_SECONDS - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        _last_request_started_at = time.monotonic()
+
+
+def _number(value: Any) -> float | None:
+    if value in (None, "", "None", "-"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_report(payload: dict[str, Any]) -> dict[str, Any]:
+    reports = payload.get("annualReports") or []
+    return reports[0] if reports else {}
+
+
+def _provider_symbol(ticker_symbol: str) -> str:
+    """Translate common app symbols to Alpha Vantage's global symbol format."""
+    ticker = ticker_symbol.strip().upper()
+    if ticker.endswith(".NS"):
+        return f"{ticker[:-3]}.BSE"
+    if ticker.endswith(".BO"):
+        return f"{ticker[:-3]}.BSE"
+    if ticker.endswith(".BSE"):
+        return ticker
+    if "-" in ticker and "." not in ticker:
+        return ticker.replace("-", ".")
+    return ticker
+
+
 class FinancialDataFetcher:
-    """
-    Fetches structured financial data using yfinance.
-    Focuses on accuracy and avoids PDF scraping.
-    """
-    
-    def __init__(self, ticker_symbol: str):
-        self.ticker_symbol = ticker_symbol
-        self.ticker = yf.Ticker(ticker_symbol)
-        
-    def get_free_cash_flow(self, years: int = 3) -> Optional[Dict[str, float]]:
-        """Retrieves the Free Cash Flow for the last N years."""
-        try:
-            cf = self.ticker.cashflow
-            if cf.empty:
-                return None
-            
-            if 'Free Cash Flow' in cf.index:
-                fcf = cf.loc['Free Cash Flow']
-                fcf.index = fcf.index.astype(str)
-                return fcf.head(years).to_dict()
-            return None
-        except Exception as exc:
-            logger.warning(
-                "Free cash flow provider failed for %s",
-                self.ticker_symbol,
-                exc_info=True,
-            )
-            raise ExternalServiceError("Free cash flow provider failed") from exc
+    """Fetch and normalize DCF fundamentals from Alpha Vantage."""
 
-    def get_checklist_metrics(self) -> Dict[str, Any]:
-        """Retrieves quantitative metrics for the Research Checklist."""
-        info = self.ticker.info
-        income_stmt = self.ticker.income_stmt
-        balance_sheet = self.ticker.balance_sheet
-        cash_flow = self.ticker.cashflow
-        
-        metrics = {}
-        try:
-            # Gross Profit Margin
-            if not income_stmt.empty:
-                latest_income = income_stmt.iloc[:, 0]
-                metrics['gross_profit'] = latest_income.get('Gross Profit')
-                metrics['revenue'] = latest_income.get('Total Revenue')
-                metrics['net_income'] = latest_income.get('Net Income')
-                
-            # ROE & Assets
-            if not balance_sheet.empty:
-                latest_bs = balance_sheet.iloc[:, 0]
-                metrics['total_assets'] = latest_bs.get('Total Assets')
-                metrics['total_debt'] = info.get('totalDebt')
-                metrics['return_on_equity'] = info.get('returnOnEquity')
-                
-            # CFO
-            if not cash_flow.empty:
-                latest_cf = cash_flow.iloc[:, 0]
-                metrics['operating_cash_flow'] = latest_cf.get('Operating Cash Flow')
-                
-            # Inventory & Receivables (Latest available)
-            if not balance_sheet.empty:
-                metrics['inventory'] = latest_bs.get('Inventory')
-                metrics['receivables'] = latest_bs.get('Net Receivables')
-                
-        except Exception:
-            logger.warning(
-                "Checklist metric extraction failed for %s",
-                self.ticker_symbol,
-                exc_info=True,
-            )
-            
-        return metrics
+    def __init__(self, ticker_symbol: str, api_key: str | None, timeout: int = 30):
+        self.ticker_symbol = ticker_symbol.strip().upper()
+        self.provider_symbol = _provider_symbol(self.ticker_symbol)
+        self.api_key = (api_key or "").strip()
+        self.timeout = timeout
 
-    def get_shares_outstanding(self) -> Optional[int]:
+    def _request(self, function: str) -> dict[str, Any]:
+        if not self.api_key:
+            raise ExternalServiceError("ALPHA_VANTAGE_API_KEY is not configured")
+        _wait_for_request_slot()
         try:
-            return self.ticker.info.get('sharesOutstanding')
-        except Exception as exc:
-            logger.warning(
-                "Shares provider failed for %s", self.ticker_symbol, exc_info=True
+            response = requests.get(
+                ALPHA_VANTAGE_URL,
+                params={
+                    "function": function,
+                    "symbol": self.provider_symbol,
+                    "apikey": self.api_key,
+                },
+                timeout=self.timeout,
             )
-            raise ExternalServiceError("Shares provider failed") from exc
-
-    def get_net_debt(self) -> Optional[float]:
+        except requests.RequestException:
+            raise ExternalServiceError("Alpha Vantage request failed") from None
+        if not response.ok:
+            raise ExternalServiceError("Alpha Vantage request failed")
         try:
-            info = self.ticker.info
-            total_debt = info.get('totalDebt')
-            total_cash = info.get('totalCash')
-            
-            # Default to 0.0 if None (common for debt-free companies)
-            debt_val = float(total_debt) if total_debt is not None else 0.0
-            cash_val = float(total_cash) if total_cash is not None else 0.0
-            
-            return debt_val - cash_val
-        except Exception as exc:
-            logger.warning(
-                "Net debt provider failed for %s", self.ticker_symbol, exc_info=True
-            )
-            raise ExternalServiceError("Net debt provider failed") from exc
+            payload = response.json()
+        except ValueError:
+            raise ExternalServiceError("Alpha Vantage returned invalid JSON") from None
 
-if __name__ == "__main__":
-    # Quick sanity check
-    fetcher = FinancialDataFetcher("AAPL")
-    print(f"FCF: {fetcher.get_free_cash_flow()}")
-    print(f"Shares: {fetcher.get_shares_outstanding()}")
-    print(f"Net Debt: {fetcher.get_net_debt()}")
+        provider_message = str(payload.get("Note") or payload.get("Information") or "")
+        quota_message = provider_message.lower()
+        if any(
+            marker in quota_message
+            for marker in ("rate limit", "call frequency", "requests per second", "requests per day")
+        ):
+            raise DataProviderRateLimitError("Alpha Vantage quota exceeded")
+        if provider_message:
+            raise ExternalServiceError("Alpha Vantage rejected the request")
+        if payload.get("Error Message"):
+            raise ExternalServiceError("Alpha Vantage did not recognize the ticker")
+        return payload
+
+    def _get_bundle(self) -> FundamentalsBundle:
+        cached = _fundamentals_cache.get(self.provider_symbol)
+        if cached is not None:
+            logger.info("Fundamentals cache hit", extra={"ticker": self.ticker_symbol})
+            return cached
+
+        logger.info("Fundamentals cache miss", extra={"ticker": self.ticker_symbol})
+        bundle = FundamentalsBundle(
+            cash_flow=self._request("CASH_FLOW"),
+            balance_sheet=self._request("BALANCE_SHEET"),
+            income_statement=self._request("INCOME_STATEMENT"),
+            overview=self._request("OVERVIEW"),
+        )
+        if not any(
+            (
+                bundle.cash_flow.get("annualReports"),
+                bundle.balance_sheet.get("annualReports"),
+                bundle.income_statement.get("annualReports"),
+                bundle.overview.get("Symbol"),
+            )
+        ):
+            raise ExternalServiceError("Alpha Vantage returned no fundamentals")
+        _fundamentals_cache.set(self.provider_symbol, bundle)
+        return bundle
+
+    def get_free_cash_flow(self, years: int = 3) -> dict[str, float] | None:
+        reports = self._get_bundle().cash_flow.get("annualReports") or []
+        history: dict[str, float] = {}
+        for report in reports[:years]:
+            operating_cash_flow = _number(report.get("operatingCashflow"))
+            capital_expenditure = _number(report.get("capitalExpenditures"))
+            fiscal_date = report.get("fiscalDateEnding")
+            if operating_cash_flow is None or capital_expenditure is None or not fiscal_date:
+                continue
+            history[str(fiscal_date)] = operating_cash_flow - abs(capital_expenditure)
+        return history or None
+
+    def get_shares_outstanding(self) -> int | None:
+        shares = _number(self._get_bundle().overview.get("SharesOutstanding"))
+        return int(shares) if shares and shares > 0 else None
+
+    def get_net_debt(self) -> float | None:
+        balance_sheet = _latest_report(self._get_bundle().balance_sheet)
+        total_debt = _number(balance_sheet.get("shortLongTermDebtTotal"))
+        if total_debt is None:
+            short_debt = _number(balance_sheet.get("shortTermDebt")) or 0.0
+            long_debt = _number(balance_sheet.get("longTermDebt")) or 0.0
+            total_debt = short_debt + long_debt
+        cash = _number(balance_sheet.get("cashAndShortTermInvestments"))
+        if cash is None:
+            cash = _number(balance_sheet.get("cashAndCashEquivalentsAtCarryingValue")) or 0.0
+        return total_debt - cash
+
+    def get_checklist_metrics(self) -> dict[str, Any]:
+        bundle = self._get_bundle()
+        income = _latest_report(bundle.income_statement)
+        balance = _latest_report(bundle.balance_sheet)
+        cash_flow = _latest_report(bundle.cash_flow)
+        return {
+            "gross_profit": _number(income.get("grossProfit")),
+            "revenue": _number(income.get("totalRevenue")),
+            "total_debt": _number(balance.get("shortLongTermDebtTotal"))
+            or _number(balance.get("longTermDebt"))
+            or 0.0,
+            "total_assets": _number(balance.get("totalAssets")) or 0.0,
+            "operating_cash_flow": _number(cash_flow.get("operatingCashflow")) or 0.0,
+            "return_on_equity": _number(bundle.overview.get("ReturnOnEquityTTM")),
+            "inventory": _number(balance.get("inventory")),
+            "receivables": _number(balance.get("currentNetReceivables")),
+            "net_income": _number(income.get("netIncome")),
+        }

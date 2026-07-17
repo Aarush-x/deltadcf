@@ -3,11 +3,18 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from api import _local_report, app
-from errors import AIProviderError, ExternalServiceError
+from api import _analysis_cache, _local_report, app
+from errors import AIProviderError, DataProviderRateLimitError, ExternalServiceError
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def reset_analysis_cache():
+    _analysis_cache.clear()
+    yield
+    _analysis_cache.clear()
 
 
 def test_health_endpoint():
@@ -41,6 +48,23 @@ def test_external_provider_failure_returns_safe_response(_mock_resolve):
     assert response.status_code == 503
     assert response.json() == {
         "detail": "A financial data provider is temporarily unavailable. Try again later."
+    }
+    assert "secret" not in response.text
+
+
+@patch("api.FinancialDataFetcher")
+@patch("api.resolve_ticker", return_value="AAPL")
+def test_provider_quota_returns_retryable_429(_mock_resolve, mock_fetcher_class):
+    mock_fetcher_class.return_value.get_free_cash_flow.side_effect = (
+        DataProviderRateLimitError("secret quota detail")
+    )
+
+    response = client.get("/api/analyze/AAPL")
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "3600"
+    assert response.json() == {
+        "detail": "The daily financial-data allowance has been reached. Try again later."
     }
     assert "secret" not in response.text
 
@@ -112,6 +136,7 @@ def test_successful_analysis_response_shape(
     response = client.get("/api/analyze/AAPL")
 
     assert response.status_code == 200
+    assert response.headers["x-deltadcf-cache"] == "MISS"
     payload = response.json()
     assert payload["ticker"] == "AAPL"
     assert payload["currency"] == "USD"
@@ -126,3 +151,9 @@ def test_successful_analysis_response_shape(
         "discount_rate",
     }
     assert isinstance(payload["valuation"]["intrinsic_price_per_share"], float)
+
+    cached_response = client.get("/api/analyze/AAPL")
+    assert cached_response.status_code == 200
+    assert cached_response.headers["x-deltadcf-cache"] == "HIT"
+    assert cached_response.json() == payload
+    assert mock_fetcher_class.call_count == 1

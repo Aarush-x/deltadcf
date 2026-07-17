@@ -4,6 +4,7 @@ from src.analysis.research_checklist import ResearchChecklist
 from src.data.report_processor import ReportProcessor, AIResearcher
 from src.data.nse_fetcher import NSEFetcher
 from src.data.bse_fetcher import BSEFetcher
+from settings import settings
 import sys
 import os
 import json
@@ -23,7 +24,11 @@ def main():
     print(f"--- ANALYZING {ticker_symbol} ---")
     
     # 1. Fetch Financial Data (Quant-First)
-    fetcher = FinancialDataFetcher(ticker_symbol)
+    fetcher = FinancialDataFetcher(
+        ticker_symbol,
+        api_key=settings.alpha_vantage_api_key,
+        timeout=settings.external_request_timeout_seconds,
+    )
     fcf_history = fetcher.get_free_cash_flow()
     shares = fetcher.get_shares_outstanding()
     net_debt = fetcher.get_net_debt()
