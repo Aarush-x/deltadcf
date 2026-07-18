@@ -15,7 +15,7 @@ const REQUEST_TIMEOUT_MS = 120_000;
 
 function errorMessageForStatus(status) {
   if (status === 404 || status === 422) {
-    return "That ticker could not be analyzed. Check the symbol and exchange suffix.";
+    return "That ticker could not be analyzed. Enter a valid S&P 500 symbol.";
   }
   if (status === 429) {
     return "The service is receiving too many requests. Wait a moment and try again.";

@@ -38,7 +38,7 @@ export default function Navbar({
         <div className="relative w-full flex items-center bg-background border border-border-terminal">
           <input
             className="ticker-input w-full bg-transparent border-none text-on-surface font-data-md text-data-md h-9 px-3 placeholder:text-text-dim"
-            placeholder="Enter ticker... e.g. AAPL, ETERNAL.NS"
+            placeholder="Enter ticker... e.g. AAPL, NVDA"
             type="text"
             value={tickerInput}
             onChange={(e) => onTickerInputChange(e.target.value)}

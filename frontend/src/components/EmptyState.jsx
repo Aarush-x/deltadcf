@@ -5,7 +5,7 @@ export default function EmptyState() {
         Enter a ticker above to begin analysis.
       </p>
       <p className="font-body-md text-body-md text-text-dim/70">
-        Supports NSE (.NS), BSE, and US equities
+        Supports S&amp;P 500 equities
       </p>
     </div>
   );

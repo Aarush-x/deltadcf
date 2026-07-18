@@ -34,7 +34,7 @@ export default function LandingPage({ onAnalyze, isDark, onToggleTheme }) {
         <div className="relative w-full flex items-center bg-background border border-border-terminal">
           <input
             className="ticker-input w-full bg-transparent border-none text-on-surface font-data-md text-data-md h-12 px-4 placeholder:text-text-dim"
-            placeholder="Enter ticker... e.g. AAPL, ETERNAL.NS"
+            placeholder="Enter ticker... e.g. AAPL, NVDA"
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -48,9 +48,6 @@ export default function LandingPage({ onAnalyze, isDark, onToggleTheme }) {
             ANALYZE →
           </button>
         </div>
-        <p className="mt-4 font-data-sm text-data-sm text-text-dim opacity-70">
-          Tip: Append <span className="text-on-surface">.NS</span> for NSE or <span className="text-on-surface">.BO</span> for BSE to target specific Indian exchanges.
-        </p>
       </div>
     </div>
   );

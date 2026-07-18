@@ -1,6 +1,4 @@
 export function formatExchangeLabel(ticker) {
-  if (ticker.endsWith(".NS")) return `NSE: ${ticker}`;
-  if (ticker.endsWith(".BO")) return `BSE: ${ticker}`;
   return `US: ${ticker}`;
 }
 
