@@ -48,6 +48,9 @@ export default function LandingPage({ onAnalyze, isDark, onToggleTheme }) {
             ANALYZE →
           </button>
         </div>
+        <p className="mt-4 font-data-sm text-data-sm text-text-dim opacity-70">
+          Currently supports S&amp;P 500 stocks only.
+        </p>
       </div>
     </div>
   );
