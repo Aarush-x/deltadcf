@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from api import FULL_CHECKLIST_TEXT, _analysis_cache, _local_report, app
+from api import FULL_CHECKLIST_TEXT, _analysis_cache, _local_report, app, normalize_ticker
 from errors import AIProviderError, DataProviderRateLimitError, ExternalServiceError
 from src.data.fetcher import FinancialDataFetcher, FundamentalsBundle
 from src.data.report_processor import AIResearcher, ReportProcessor
@@ -36,6 +36,21 @@ def test_invalid_ticker_is_rejected(ticker):
 
     assert response.status_code in {404, 422}
     assert "traceback" not in response.text.lower()
+
+
+@pytest.mark.parametrize("ticker", ["ETERNAL.NS", "TSM", "^GSPC"])
+def test_non_sp500_ticker_is_rejected(ticker):
+    with pytest.raises(Exception) as captured:
+        normalize_ticker(ticker)
+
+    assert captured.value.status_code == 422
+    assert captured.value.detail == "DeltaDCF currently supports S&P 500 stocks only."
+
+
+def test_sp500_tickers_and_class_share_alias_are_accepted():
+    assert normalize_ticker("aapl") == "AAPL"
+    assert normalize_ticker("nvda") == "NVDA"
+    assert normalize_ticker("brk.b") == "BRK-B"
 
 
 def test_missing_reports_directory_is_safe(tmp_path):

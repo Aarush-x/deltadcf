@@ -10,10 +10,9 @@ from errors import AIProviderError, DataProviderRateLimitError, ExternalServiceE
 from settings import settings
 from src.analysis.dcf import DCFEngine
 from src.analysis.research_checklist import ResearchChecklist
-from src.data.bse_fetcher import BSEFetcher
 from src.data.fetcher import FinancialDataFetcher
-from src.data.nse_fetcher import NSEFetcher
 from src.data.report_processor import AIResearcher, ReportProcessor
+from src.data.sp500 import SP500_TICKERS
 from src.utils.cache import TTLCache
 
 
@@ -87,7 +86,13 @@ def normalize_ticker(value: str) -> str:
             status_code=422,
             detail="Ticker must contain only letters, numbers, dots, carets, equals signs, or hyphens.",
         )
-    return ticker
+    canonical_ticker = ticker.replace(".", "-")
+    if canonical_ticker not in SP500_TICKERS:
+        raise HTTPException(
+            status_code=422,
+            detail="DeltaDCF currently supports S&P 500 stocks only.",
+        )
+    return canonical_ticker
 
 
 def resolve_ticker(query: str) -> str:
@@ -99,7 +104,7 @@ def _local_report(ticker_symbol: str, reports_dir: Path) -> Path | None:
     if not reports_dir.is_dir():
         return None
 
-    prefix = ticker_symbol.removesuffix(".NS").removesuffix(".BO").upper()
+    prefix = ticker_symbol.upper()
     candidates = sorted(
         path
         for path in reports_dir.iterdir()
@@ -116,29 +121,7 @@ def get_mda_text(ticker_symbol: str, processor: ReportProcessor) -> str:
         raw_text = processor.extract_text_from_pdf(local_report)
         return processor.get_key_sections(raw_text).get("mda", "")
 
-    is_indian_stock = ticker_symbol.endswith((".NS", ".BO", ".BSE"))
-    if not is_indian_stock:
-        return processor.get_sec_mda() or ""
-
-    report_url = BSEFetcher(
-        timeout=settings.external_request_timeout_seconds
-    ).get_latest_annual_report_url(ticker_symbol)
-    if not report_url:
-        report_url = NSEFetcher(
-            timeout=settings.external_request_timeout_seconds
-        ).get_latest_annual_report_url(ticker_symbol)
-    if not report_url:
-        return ""
-
-    downloaded_path = processor.download_report(report_url)
-    if not downloaded_path:
-        return ""
-
-    try:
-        raw_text = processor.extract_text_from_pdf(downloaded_path)
-        return processor.get_key_sections(raw_text).get("mda", "")
-    finally:
-        processor.cleanup_download(downloaded_path)
+    return processor.get_sec_mda() or ""
 
 
 @app.get("/health", include_in_schema=False)
@@ -152,7 +135,7 @@ TickerPath = Annotated[
         min_length=1,
         max_length=20,
         pattern=r"^[A-Za-z0-9^][A-Za-z0-9.^=-]{0,19}$",
-        description="A market ticker such as AAPL, BRK-B, or INFY.NS",
+        description="An S&P 500 ticker such as AAPL, NVDA, or BRK-B",
     ),
 ]
 
@@ -240,7 +223,7 @@ def analyze(ticker: TickerPath, response: Response):
             intrinsic_value, net_debt, shares
         )
 
-        currency = "INR" if ticker_symbol.endswith((".NS", ".BO", ".BSE")) else "USD"
+        currency = "USD"
         result = {
             "ticker": ticker_symbol,
             "currency": currency,
