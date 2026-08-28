@@ -333,12 +333,6 @@ class AIResearcher:
             logger.info("AI auditing layer is using Google Gemini")
             models_to_try = [
                 "gemini-3.5-flash",
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-2.0-flash-lite",
-                "gemini-2.5-pro",
-                "gemini-2.3-pro",
-                "gemini-2.3-flash-lite"
             ]
             for model in models_to_try:
                 try:
